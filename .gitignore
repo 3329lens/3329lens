@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target
+
+# Generated export files (from the scanner dashboard)
+scan_results_*.json
+library_inventory_*.csv
+migration_plan_*.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS-specific
+Thumbs.db
+.directory
+
+# Backup files
+*.bak
+*.tmp

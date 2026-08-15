@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # `-D warnings` is deliberately NOT set yet: the moved sources carry four
+  # pre-existing warnings from the monorepo. Add it in the same follow-up commit
+  # that clears them and makes the style job blocking.
+
+jobs:
+  # Portability is a product claim, so prove it on every push. There is no
+  # assembly and no build.rs here, so one build configuration covers all three.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --locked --all-targets
+      - name: Test
+        run: cargo test --locked
+
+  # The library must stay usable without the CLI/TUI stack — this is what the
+  # `cli` feature gate exists to guarantee, and what the hosted backend consumes.
+  lib-only:
+    name: lib-only (no default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --no-default-features
+      - run: cargo test --locked --no-default-features
+
+  # Catch metadata problems here rather than at `cargo publish` time.
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --locked
+
+  # Advisory only. The scanner sources were moved verbatim from the monorepo,
+  # which never enforced rustfmt, so `cargo fmt --check` currently reports a
+  # large diff. Reformatting during extraction would destroy the verbatim-move
+  # property that makes this port reviewable. Land a dedicated formatting commit
+  # after extraction, then delete `continue-on-error` from both steps below.
+  style:
+    name: style (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --check
+        continue-on-error: true
+      - name: clippy
+        run: cargo clippy --locked --all-targets
+        continue-on-error: true
