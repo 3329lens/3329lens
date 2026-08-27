@@ -39,8 +39,11 @@ lens3329 = "0.1"
   *transitively* are surfaced as well. Accurate versions are what make purls
   and CVE correlation meaningful.
 - **Advisory correlation** — matches resolved versions against a *local*
-  advisory database: a RustSec `advisory-db` clone (TOML) and/or an OSV JSON
-  export. No network access. Advisories are indexed by `(ecosystem, name)`, so
+  advisory database: a RustSec `advisory-db` clone (`.md` advisories with a
+  fenced TOML block, or bare `.toml`) and/or an OSV JSON export. No network
+  access. A database that yields zero usable advisories is a hard error rather
+  than a silent "nothing matched", so `--fail-on` cannot pass for the wrong
+  reason. Advisories are indexed by `(ecosystem, name)`, so
   same-named packages on crates.io, npm and PyPI cannot cross-match. Version
   comparison is ecosystem-aware — semver for Cargo and npm, a from-scratch
   PEP 440 comparator for PyPI. Severity is derived by computing CVSS v3.x base

@@ -171,9 +171,16 @@ pub struct AdvisoryDb {
 }
 
 impl AdvisoryDb {
-    /// Recursively load advisories from a local directory. `.toml` files are
-    /// parsed as RustSec advisories, `.json` as OSV. Unparseable files are
-    /// skipped. Reuses the scanner's DoS-guarded reader.
+    /// Recursively load advisories from a local directory. `.md` and `.toml`
+    /// files are parsed as RustSec advisories, `.json` as OSV. Unparseable files
+    /// are skipped. Reuses the scanner's DoS-guarded reader.
+    ///
+    /// `.md` is the format the real `rustsec/advisory-db` repository actually
+    /// ships: a fenced ```` ```toml ```` block followed by markdown prose. At the
+    /// time of writing that clone contains 1,217 such files and a single bare
+    /// `.toml`, so extension-matching on `toml` alone silently loads nothing.
+    /// Non-advisory markdown in the repo (README, contributor guides) has no
+    /// leading TOML block and is skipped by the parser rather than special-cased.
     pub fn load_from_dir(path: &Path) -> std::io::Result<AdvisoryDb> {
         let mut db = AdvisoryDb::default();
         for entry in WalkDir::new(path)
@@ -186,8 +193,8 @@ impl AdvisoryDb {
                 continue;
             }
             match p.extension().and_then(|e| e.to_str()) {
-                Some("toml") => {
-                    if let Some(a) = parse_rustsec_toml(p) {
+                Some("toml") | Some("md") => {
+                    if let Some(a) = parse_rustsec_advisory(p) {
                         db.insert(a);
                     }
                 }
@@ -327,16 +334,61 @@ pub fn correlate(db: &AdvisoryDb, findings: &[CryptoFinding]) -> CorrelationResu
     result
 }
 
-/// Parse a RustSec advisory TOML file into an [`Advisory`].
+/// Split a RustSec advisory file into its TOML metadata and its markdown body.
 ///
-/// Reads `[advisory]` (id, package, title, optional cvss vector) and
-/// `[versions]` (patched, unaffected). Informational advisories
+/// Real advisories are markdown: a fenced ```` ```toml ```` block, then prose
+/// whose first `# ` heading is the advisory title. A file that is entirely TOML
+/// (the hand-written fixture shape, and one file in the real repo) is returned
+/// as-is with no body. Returns `None` for markdown with no leading TOML block,
+/// which is how the repo's README and contributor guides get skipped.
+fn split_advisory_frontmatter(content: &str) -> Option<(&str, &str)> {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("```") {
+        // No fence: treat the whole file as TOML. Bare-TOML advisories have no
+        // markdown body, so the title must come from the TOML itself.
+        return Some((content, ""));
+    }
+
+    // Step over the opening fence line (```toml, ```TOML, or a bare ```).
+    let after_open = trimmed.find('\n').map(|i| &trimmed[i + 1..])?;
+
+    // The closing fence is the next line that begins with ```.
+    let mut offset = 0usize;
+    for line in after_open.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") {
+            return Some((&after_open[..offset], &after_open[offset + line.len()..]));
+        }
+        offset += line.len();
+    }
+    // Unterminated fence — malformed, so decline rather than guess.
+    None
+}
+
+/// The advisory title: the first `# ` ATX heading in the markdown body.
+fn markdown_title(body: &str) -> Option<String> {
+    body.lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("# "))
+        .map(|l| l.trim_start_matches("# ").trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
+/// Parse a RustSec advisory file (`.md` or `.toml`) into an [`Advisory`].
+///
+/// Reads `[advisory]` (id, package, optional cvss vector) and `[versions]`
+/// (patched, unaffected). Informational advisories
 /// (`[advisory].informational`, e.g. "unmaintained") are skipped — they are not
 /// vulnerabilities. Severity is derived from the CVSS vector when present,
 /// otherwise defaults to `Medium` (documented, conservative-ish).
-fn parse_rustsec_toml(path: &Path) -> Option<Advisory> {
+///
+/// The title is taken from the markdown body's first `# ` heading. Real RustSec
+/// advisories carry no `title` field in their TOML — all 1,196 of them put it in
+/// the prose — so reading only the TOML key yields an empty title on every real
+/// advisory. The TOML key is still honoured when present, for bare-TOML files.
+fn parse_rustsec_advisory(path: &Path) -> Option<Advisory> {
     let content = read_file_with_limit(path, MAX_MANIFEST_SIZE).ok()?;
-    let val: toml::Value = toml::from_str(&content).ok()?;
+    let (toml_src, body) = split_advisory_frontmatter(&content)?;
+    let val: toml::Value = toml::from_str(toml_src).ok()?;
     let adv = val.get("advisory")?;
 
     if adv.get("informational").is_some() {
@@ -348,8 +400,9 @@ fn parse_rustsec_toml(path: &Path) -> Option<Advisory> {
     let title = adv
         .get("title")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+        .map(str::to_string)
+        .or_else(|| markdown_title(body))
+        .unwrap_or_default();
 
     let cvss = adv
         .get("cvss")
@@ -810,5 +863,114 @@ mod tests {
     fn non_cvss3_vector_returns_none() {
         assert!(cvss_base_score("not a vector").is_none());
         assert!(cvss_base_score("CVSS:2.0/AV:N/AC:L").is_none());
+    }
+
+    // --- Real-world RustSec `.md` format -----------------------------------
+    //
+    // These use the exact shape of files in the rustsec/advisory-db clone: a
+    // fenced ```toml block, then prose whose first `# ` heading is the title.
+    // The previous fixtures were all hand-written bare TOML, which is why the
+    // loader could accept zero real advisories with every test still green.
+
+    /// Verbatim structure of `crates/actix-http/RUSTSEC-2020-0048.md`.
+    const REAL_ADVISORY_MD: &str = r#"```toml
+[advisory]
+id = "RUSTSEC-2020-0048"
+package = "actix-http"
+aliases = ["CVE-2020-35901", "GHSA-v3j6-xf77-8r9c"]
+cvss = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+categories = ["memory-corruption"]
+date = "2020-01-24"
+url = "https://github.com/actix/actix-web/issues/1321"
+
+[versions]
+patched = [">= 2.0.0-alpha.1"]
+```
+
+# Use-after-free in BodyStream due to lack of pinning
+
+Affected versions of this crate did not require the buffer wrapped in
+`BodyStream` to be pinned.
+"#;
+
+    fn write_tmp(name: &str, contents: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("lens3329-adv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn parses_real_rustsec_markdown_advisory() {
+        let path = write_tmp("RUSTSEC-2020-0048.md", REAL_ADVISORY_MD);
+        let adv = parse_rustsec_advisory(&path).expect("real .md advisory should parse");
+
+        assert_eq!(adv.id, "RUSTSEC-2020-0048");
+        assert_eq!(adv.package, "actix-http");
+        assert_eq!(adv.ecosystem, Ecosystem::Cargo);
+        // Title lives in the prose, not the TOML.
+        assert_eq!(adv.title, "Use-after-free in BodyStream due to lack of pinning");
+        assert_eq!(adv.patched, vec![">= 2.0.0-alpha.1".to_string()]);
+        // AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H => 7.5 High.
+        assert_eq!(adv.severity, Severity::High);
+        assert!((adv.cvss.unwrap() - 7.5).abs() < 0.05);
+    }
+
+    #[test]
+    fn real_markdown_advisory_correlates_against_a_locked_finding() {
+        let path = write_tmp("RUSTSEC-2020-0048-corr.md", REAL_ADVISORY_MD);
+        let mut db = AdvisoryDb::default();
+        db.insert(parse_rustsec_advisory(&path).unwrap());
+
+        let vulnerable = locked_finding("actix-http", "1.0.0");
+        assert_eq!(db.matches(&Ecosystem::Cargo, "actix-http", "1.0.0").len(), 1);
+        assert!(!correlate(&db, std::slice::from_ref(&vulnerable)).matches.is_empty());
+
+        // Patched version must not match.
+        assert!(db.matches(&Ecosystem::Cargo, "actix-http", "2.0.0").is_empty());
+    }
+
+    #[test]
+    fn informational_markdown_advisory_is_skipped() {
+        // `informational = "unmaintained"` — 476 of the 1,196 real advisories.
+        let path = write_tmp(
+            "RUSTSEC-2025-0123.md",
+            "```toml\n[advisory]\nid = \"RUSTSEC-2025-0123\"\npackage = \"opentelemetry-jaeger\"\n\
+             informational = \"unmaintained\"\n\n[versions]\npatched = []\n```\n\n# unmaintained\n",
+        );
+        assert!(parse_rustsec_advisory(&path).is_none());
+    }
+
+    #[test]
+    fn non_advisory_markdown_is_skipped() {
+        // The repo's README / contributor guides have no leading TOML block.
+        let path = write_tmp("README.md", "# RustSec Advisory Database\n\nProse only.\n");
+        assert!(parse_rustsec_advisory(&path).is_none());
+    }
+
+    #[test]
+    fn bare_toml_advisory_still_parses() {
+        // Regression guard: the hand-written fixture shape must keep working.
+        let path = write_tmp(
+            "bare.toml",
+            "[advisory]\nid = \"RUSTSEC-2099-0001\"\npackage = \"ring\"\n\
+             title = \"Explicit title\"\n\n[versions]\npatched = [\">= 0.18.0\"]\n",
+        );
+        let adv = parse_rustsec_advisory(&path).expect("bare TOML should still parse");
+        assert_eq!(adv.package, "ring");
+        assert_eq!(adv.title, "Explicit title");
+    }
+
+    #[test]
+    fn unterminated_fence_is_declined() {
+        assert!(split_advisory_frontmatter("```toml\n[advisory]\nid = \"x\"\n").is_none());
+    }
+
+    #[test]
+    fn empty_db_is_reported_as_empty() {
+        // What the CLI's fail-loud guard keys off.
+        assert!(AdvisoryDb::default().is_empty());
+        assert_eq!(AdvisoryDb::default().len(), 0);
     }
 }

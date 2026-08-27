@@ -153,6 +153,19 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
     let correlation: Option<CorrelationResult> = match advisory_db {
         Some(db_path) => {
             let db = AdvisoryDb::load_from_dir(std::path::Path::new(db_path))?;
+
+            // An empty database produces "no vulnerabilities matched", which is
+            // indistinguishable from a clean scan and makes `--fail-on` pass for
+            // the wrong reason. Refuse rather than report false assurance.
+            if db.is_empty() {
+                return Err(format!(
+                    "advisory database at '{db_path}' contains no usable advisories.\n\
+                     Expected RustSec `.md`/`.toml` advisories or OSV `.json` files.\n\
+                     Continuing would report 'no vulnerabilities' regardless of what is installed."
+                )
+                .into());
+            }
+
             println!("\n{}", format!("🛡️  Loaded {} advisories from {}", db.len(), db_path).bold().cyan());
             let result = scanner_core::advisories::correlate(&db, findings);
 
