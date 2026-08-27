@@ -197,14 +197,84 @@ fn cargo_crypto_crates() -> Vec<(&'static str, CryptoType)> {
 
 /// Crypto packages of interest in npm manifests/lockfiles, with their category.
 /// Single source of truth shared by the manifest and lockfile code paths.
+///
+/// Names are matched exactly, so generic-looking entries (`jose`, `pem`, `md5`)
+/// are safe — they are real package names, not substrings.
+///
+/// Every entry was checked to exist on the registry and to be genuinely
+/// cryptographic rather than merely crypto-adjacent; a proxy agent or a
+/// base64 codec does not belong here. The JOSE/JWT and browserify-shim families
+/// dominate real dependency trees: a bare `jsonwebtoken` install pulls in `jwa`,
+/// `jws`, `ecdsa-sig-formatter` and `buffer-equal-constant-time`, none of which
+/// the original six-entry table saw.
+#[cfg(test)]
+pub(crate) fn npm_crypto_packages_for_test() -> Vec<(&'static str, CryptoType)> {
+    npm_crypto_packages()
+}
+
 fn npm_crypto_packages() -> Vec<(&'static str, CryptoType)> {
     vec![
+        // Umbrella / general-purpose crypto libraries.
         ("crypto", CryptoType::GeneralCrypto),
         ("crypto-js", CryptoType::GeneralCrypto),
-        ("bcrypt", CryptoType::GeneralCrypto),
+        ("crypto-browserify", CryptoType::GeneralCrypto),
         ("node-forge", CryptoType::GeneralCrypto),
+        ("jsrsasign", CryptoType::GeneralCrypto),
+        ("openpgp", CryptoType::GeneralCrypto),
+        // NaCl / libsodium family.
         ("tweetnacl", CryptoType::GeneralCrypto),
+        ("tweetnacl-util", CryptoType::GeneralCrypto),
+        ("libsodium", CryptoType::GeneralCrypto),
         ("libsodium-wrappers", CryptoType::GeneralCrypto),
+        ("sodium-native", CryptoType::GeneralCrypto),
+        ("@stablelib/chacha20poly1305", CryptoType::GeneralCrypto),
+        // JOSE / JWT — signing and encryption, overwhelmingly RSA and ECDSA.
+        ("jose", CryptoType::GeneralCrypto),
+        ("node-jose", CryptoType::GeneralCrypto),
+        ("jsonwebtoken", CryptoType::GeneralCrypto),
+        ("jws", CryptoType::GeneralCrypto),
+        ("jwa", CryptoType::GeneralCrypto),
+        ("ecdsa-sig-formatter", CryptoType::GeneralCrypto),
+        // Asymmetric primitives — all Shor-breakable, so they matter most to
+        // the post-quantum risk assessment.
+        ("elliptic", CryptoType::GeneralCrypto),
+        ("secp256k1", CryptoType::GeneralCrypto),
+        ("eccrypto", CryptoType::GeneralCrypto),
+        ("node-rsa", CryptoType::GeneralCrypto),
+        ("public-encrypt", CryptoType::GeneralCrypto),
+        ("browserify-sign", CryptoType::GeneralCrypto),
+        ("diffie-hellman", CryptoType::GeneralCrypto),
+        ("@noble/curves", CryptoType::GeneralCrypto),
+        ("@noble/secp256k1", CryptoType::GeneralCrypto),
+        // Symmetric ciphers.
+        ("aes-js", CryptoType::GeneralCrypto),
+        ("browserify-aes", CryptoType::GeneralCrypto),
+        ("@noble/ciphers", CryptoType::GeneralCrypto),
+        // Password hashing and key derivation.
+        ("bcrypt", CryptoType::GeneralCrypto),
+        ("bcryptjs", CryptoType::GeneralCrypto),
+        ("argon2", CryptoType::GeneralCrypto),
+        ("scrypt-js", CryptoType::GeneralCrypto),
+        ("pbkdf2", CryptoType::GeneralCrypto),
+        // MACs and randomness.
+        ("create-hmac", CryptoType::GeneralCrypto),
+        ("randombytes", CryptoType::GeneralCrypto),
+        ("buffer-equal-constant-time", CryptoType::GeneralCrypto),
+        // Dedicated hash implementations.
+        ("@noble/hashes", CryptoType::HashFunction),
+        ("hash.js", CryptoType::HashFunction),
+        ("sha.js", CryptoType::HashFunction),
+        ("create-hash", CryptoType::HashFunction),
+        ("js-sha256", CryptoType::HashFunction),
+        ("js-sha3", CryptoType::HashFunction),
+        ("keccak", CryptoType::HashFunction),
+        ("blakejs", CryptoType::HashFunction),
+        ("md5", CryptoType::HashFunction),
+        // X.509 / TLS certificate tooling.
+        ("selfsigned", CryptoType::SSL_TLS),
+        ("pem", CryptoType::SSL_TLS),
+        // Post-quantum.
+        ("@noble/post-quantum", CryptoType::PostQuantum),
     ]
 }
 

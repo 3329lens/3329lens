@@ -490,6 +490,7 @@ pub fn format_uuid_v4(mut bytes: [u8; 16]) -> String {
 }
 
 /// A cryptographic algorithm asset inferred from a library's identity.
+#[derive(Debug)]
 struct AlgorithmSpec {
     name: &'static str,
     primitive: Primitive,
@@ -532,6 +533,10 @@ fn rsa() -> AlgorithmSpec {
 fn ecdsa() -> AlgorithmSpec {
     algo("ECDSA-P256", Primitive::Signature, Some("P-256"), Some("P-256"), Some(128), Some(0), Some("1.2.840.10045.2.1"))
 }
+/// Classical finite-field Diffie-Hellman. Shor-breakable, hence quantum level 0.
+fn dh() -> AlgorithmSpec {
+    algo("DH-2048", Primitive::KeyAgree, Some("2048"), None, Some(112), Some(0), None)
+}
 fn ecdh() -> AlgorithmSpec {
     algo("ECDH-P256", Primitive::KeyAgree, Some("P-256"), Some("P-256"), Some(128), Some(0), None)
 }
@@ -570,6 +575,69 @@ fn mldsa65() -> AlgorithmSpec {
 /// libraries return an empty set rather than fabricating assets.
 fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
     let n = name.to_lowercase();
+
+    // Exact npm package names are resolved before the substring cascade below.
+    // Several are ordinary words (`jose`, `pem`, `md5`) that must not be matched
+    // as substrings of unrelated names, and several would otherwise fall through
+    // to an empty set despite being plainly asymmetric — which would hide them
+    // from the quantum-risk count, the one number this report exists to produce.
+    match n.as_str() {
+        // JOSE/JWT: RS256, ES256 and HS256 are the algorithms actually in use.
+        "jose" | "node-jose" | "jsonwebtoken" | "jws" | "jwa" | "jsrsasign" => {
+            return vec![rsa(), ecdsa(), hmac(), sha256()];
+        }
+        // Elliptic-curve primitives.
+        "elliptic" | "@noble/curves" => return vec![ecdsa(), ecdh()],
+        "secp256k1" | "@noble/secp256k1" | "eccrypto" => return vec![ecdsa()],
+        // Finite-field and RSA primitives.
+        "node-rsa" | "public-encrypt" => return vec![rsa()],
+        "browserify-sign" => return vec![rsa(), ecdsa()],
+        "diffie-hellman" => return vec![dh()],
+        // Symmetric and umbrella shims. `crypto` is the npm package that stands
+        // in for Node's built-in module, which exposes essentially everything.
+        "@noble/ciphers" => return vec![aes256(), chacha20()],
+        "crypto" => return vec![rsa(), ecdsa(), ecdh(), aes256(), sha256(), hmac()],
+        "crypto-browserify" => return vec![rsa(), aes256(), sha256(), hmac()],
+        "openpgp" => return vec![rsa(), ecdsa(), aes256(), sha256()],
+        // X.509 tooling generates RSA keys and SHA-256 signatures.
+        "selfsigned" | "pem" => return vec![rsa(), sha256()],
+        // Key derivation.
+        "pbkdf2" => {
+            return vec![algo("PBKDF2", Primitive::Kdf, None, None, None, None, None)];
+        }
+        "scrypt-js" => {
+            return vec![algo("scrypt", Primitive::Kdf, None, None, None, None, None)];
+        }
+        // Hashes.
+        "@noble/hashes" | "hash.js" | "sha.js" | "create-hash" => return vec![sha256()],
+        "create-hmac" => return vec![hmac()],
+        "keccak" => return vec![sha256_variant("SHA3-256")],
+        "blakejs" => {
+            return vec![algo("BLAKE2", Primitive::Hash, None, None, Some(128), Some(2), None)];
+        }
+        // MD5 is broken, but *classically* — collision resistance, not Shor.
+        // classicalSecurityLevel 0 records that; nistQuantumSecurityLevel is
+        // deliberately left unset, because the CLI reports level 0 as
+        // "Quantum-vulnerable (Shor-breakable)" and folding a broken hash into
+        // that count would misstate the post-quantum migration scope.
+        "md5" => {
+            return vec![algo(
+                "MD5",
+                Primitive::Hash,
+                Some("128"),
+                None,
+                Some(0),
+                None,
+                Some("1.2.840.113549.2.5"),
+            )];
+        }
+        "@noble/post-quantum" => return vec![mlkem768(), mldsa65()],
+        // Deliberately no algorithm assets: these are crypto building blocks
+        // with no algorithm of their own. Naming them here documents that the
+        // empty set is a decision, not an oversight.
+        "randombytes" | "buffer-equal-constant-time" => return Vec::new(),
+        _ => {}
+    }
 
     // Post-quantum: umbrella crates/libs, then specific primitives.
     if n.contains("oqs") || n.contains("pqcrypto") {
@@ -896,5 +964,77 @@ mod tests {
             .expect("expected a cryptographic-asset component");
         assert_eq!(asset["cryptoProperties"]["assetType"], "algorithm");
         assert!(asset["bom-ref"].is_string());
+    }
+
+    // --- npm crypto packages present in real dependency trees ----------------
+
+    /// Every npm package the scanner recognises must infer at least one
+    /// algorithm, or be one of the two building blocks that deliberately have
+    /// none. A recognised library with an empty asset set is invisible to the
+    /// quantum-risk count, which is the report's headline number.
+    #[test]
+    fn every_recognised_npm_package_infers_algorithms_or_is_exempt() {
+        // Blocks with no algorithm of their own: a CSPRNG shim and a
+        // constant-time comparison helper.
+        const EXEMPT: [&str; 2] = ["randombytes", "buffer-equal-constant-time"];
+
+        for (name, _) in crate::scanner::npm_crypto_packages_for_test() {
+            let algos = algorithms_for_library(name);
+            if EXEMPT.contains(&name) {
+                assert!(algos.is_empty(), "{name} is exempt but inferred {algos:?}");
+            } else {
+                assert!(
+                    !algos.is_empty(),
+                    "{name} is recognised as crypto but infers no algorithms, so it \
+                     would never appear in the quantum-risk assessment"
+                );
+            }
+        }
+    }
+
+    /// The asymmetric npm packages are the ones a post-quantum migration is
+    /// actually about, so pin that each is flagged Shor-breakable.
+    #[test]
+    fn asymmetric_npm_packages_are_flagged_quantum_vulnerable() {
+        for name in [
+            "jose",
+            "jsonwebtoken",
+            "jws",
+            "elliptic",
+            "secp256k1",
+            "node-rsa",
+            "diffie-hellman",
+            "public-encrypt",
+            "browserify-sign",
+            "selfsigned",
+            "@noble/curves",
+        ] {
+            let algos = algorithms_for_library(name);
+            assert!(
+                algos.iter().any(|a| a.nist_quantum_security_level == Some(0)),
+                "{name} should carry a Shor-breakable algorithm, got {algos:?}"
+            );
+        }
+    }
+
+    /// MD5 is broken classically, not by Shor. It must not inflate the count
+    /// the CLI prints as "Quantum-vulnerable (Shor-breakable)".
+    #[test]
+    fn md5_is_classically_broken_but_not_counted_as_shor_breakable() {
+        let algos = algorithms_for_library("md5");
+        assert_eq!(algos.len(), 1);
+        assert_eq!(algos[0].name, "MD5");
+        assert_eq!(algos[0].classical_security_level, Some(0));
+        assert_eq!(algos[0].nist_quantum_security_level, None);
+    }
+
+    /// Generic-looking entries are exact package names, and must not match as
+    /// substrings of unrelated libraries.
+    #[test]
+    fn generic_npm_names_do_not_match_as_substrings() {
+        // `jose` must not swallow these, nor `pem`/`md5` match by containment.
+        assert!(algorithms_for_library("morose-utils").is_empty());
+        assert!(algorithms_for_library("temperature").is_empty());
+        assert!(algorithms_for_library("command5").is_empty());
     }
 }
