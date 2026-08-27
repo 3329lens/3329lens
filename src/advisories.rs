@@ -15,7 +15,10 @@
  * Scope: crates.io (RustSec TOML + OSV), npm and PyPI (OSV JSON). Advisories
  * are indexed by `(ecosystem, package)` so a name shared across ecosystems
  * (e.g. `cryptography` on PyPI vs. a same-named npm package) cannot cross-match.
- * OSV JSON is parsed for single-range advisories. This is a teaching-grade
+ * OSV JSON is parsed for the full range model: multiple ranges per affected
+ * entry, several introduced/fixed spans within one range, `last_affected`
+ * bounds, and explicitly enumerated `versions`. GIT ranges bound by commit
+ * rather than version and are skipped as unevaluable. This is a teaching-grade
  * correlator, not a replacement for `cargo audit` / a commercial scanner.
  *
  * Version comparison is ecosystem-aware: crates.io and npm versions are semver
