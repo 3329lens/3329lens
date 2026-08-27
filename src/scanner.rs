@@ -226,19 +226,22 @@ fn pypi_crypto_packages() -> Vec<(&'static str, CryptoType)> {
 /// `ruamel.yaml` -> `ruamel-yaml`. This is the canonical form used for all
 /// PyPI name comparisons (findings, lockfile keys, OSV advisory names).
 pub fn normalize_pypi_name(name: &str) -> String {
+    // Exactly PEP 503's `re.sub(r"[-_.]+", "-", name).lower()`: collapse each run
+    // of separators to a single `-`, then lowercase. Leading and trailing
+    // separators are preserved, not stripped — PEP 508 forbids names shaped that
+    // way, but advisory feeds do carry them (the OSV malware feed has entries
+    // like `urlcon-`), and silently normalizing them differently from the
+    // published formula makes our keys disagree with everyone else's.
     let lower = name.trim().to_lowercase();
     let mut out = String::with_capacity(lower.len());
     let mut prev_sep = false;
     for c in lower.chars() {
         if matches!(c, '-' | '_' | '.') {
-            // Only emit a separator between name characters (no leading/dup seps).
-            if !out.is_empty() {
-                prev_sep = true;
-            }
-        } else {
-            if prev_sep {
+            if !prev_sep {
                 out.push('-');
             }
+            prev_sep = true;
+        } else {
             out.push(c);
             prev_sep = false;
         }
@@ -1324,6 +1327,14 @@ mod tests {
         assert_eq!(normalize_pypi_name("ruamel.yaml"), "ruamel-yaml");
         assert_eq!(normalize_pypi_name("foo__bar..baz"), "foo-bar-baz");
         assert_eq!(normalize_pypi_name("  Cryptography  "), "cryptography");
+        // PEP 503 is `re.sub(r"[-_.]+", "-", name).lower()` — it collapses runs
+        // but does NOT strip leading or trailing separators. PEP 508 forbids
+        // names shaped this way, yet the OSV malware feed ships them (e.g.
+        // `urlcon-`), and diverging from the published formula would key them
+        // differently from every other consumer.
+        assert_eq!(normalize_pypi_name("urlcon-"), "urlcon-");
+        assert_eq!(normalize_pypi_name("-lead"), "-lead");
+        assert_eq!(normalize_pypi_name("trail___"), "trail-");
     }
 
     #[test]

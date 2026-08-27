@@ -56,6 +56,16 @@ impl ParsedVersion {
         }
     }
 
+    /// Order this version against a bare version string under the same scheme.
+    /// `None` when the other string is not a valid version — callers must treat
+    /// that as "cannot decide" rather than as any particular ordering.
+    fn cmp_str(&self, other: &str) -> Option<std::cmp::Ordering> {
+        match self {
+            ParsedVersion::Semver(v) => Version::parse(other).ok().map(|o| v.cmp(&o)),
+            ParsedVersion::Pep440(v) => pep440::Version::parse(other).map(|o| v.cmp(&o)),
+        }
+    }
+
     /// Does this version satisfy a single requirement string (e.g. `>= 1.2.0`)?
     /// An unparseable requirement matches nothing.
     fn satisfies(&self, req: &str) -> bool {
@@ -121,6 +131,67 @@ impl Severity {
     }
 }
 
+/// A contiguous span of affected versions: `[introduced, end)`, or
+/// `[introduced, end]` when `end_inclusive` (OSV's `last_affected`). An absent
+/// bound is open in that direction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Interval {
+    introduced: Option<String>,
+    end: Option<String>,
+    end_inclusive: bool,
+}
+
+impl Interval {
+    fn contains(&self, v: &ParsedVersion) -> bool {
+        use std::cmp::Ordering::*;
+        if let Some(lo) = &self.introduced {
+            // An unparseable bound means we cannot place the version relative to
+            // it. Decline rather than guess in either direction.
+            match v.cmp_str(lo) {
+                Some(Less) | None => return false,
+                _ => {}
+            }
+        }
+        if let Some(hi) = &self.end {
+            match v.cmp_str(hi) {
+                Some(Less) => {}
+                Some(Equal) if self.end_inclusive => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+/// How an advisory describes the versions it affects.
+///
+/// The two source formats carry genuinely different semantics and must not be
+/// flattened into one list of requirement strings: doing so loses the pairing
+/// between an `introduced` bound and the `fixed` bound that closes it, which
+/// silently breaks every advisory covering more than one span.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Affected {
+    /// RustSec: affected unless a `patched` or explicitly `unaffected`
+    /// requirement matches. The affected set is the complement.
+    Requirements {
+        patched: Vec<String>,
+        unaffected: Vec<String>,
+    },
+    /// OSV: the union of `intervals` and any explicitly enumerated `versions`.
+    /// An empty union matches nothing.
+    Ranges {
+        intervals: Vec<Interval>,
+        versions: Vec<String>,
+    },
+    /// The advisory names the package with no version qualification at all
+    /// (no `ranges`, no `versions`), so every version is affected. Rare — 22
+    /// entries across the ~255k-advisory OSV corpus — but distinguishing it
+    /// from "we could not evaluate this" matters, since the two demand
+    /// opposite answers.
+    AllVersions,
+}
+
 /// A single advisory affecting a package over some version range(s).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Advisory {
@@ -133,18 +204,39 @@ pub struct Advisory {
     pub severity: Severity,
     /// CVSS base score when derivable from a CVSS v3 vector, else `None`.
     pub cvss: Option<f32>,
-    /// semver requirement strings considered *patched* (fixed).
-    patched: Vec<String>,
-    /// semver requirement strings explicitly *unaffected*.
-    unaffected: Vec<String>,
+    /// The set of versions this advisory applies to.
+    pub affected: Affected,
 }
 
 impl Advisory {
-    /// Is `version` affected? A version is affected when it satisfies neither a
-    /// patched range nor an explicitly-unaffected range.
-    pub fn affects(&self, version: &ParsedVersion) -> bool {
-        let satisfies = |reqs: &[String]| reqs.iter().any(|r| version.satisfies(r));
-        !satisfies(&self.patched) && !satisfies(&self.unaffected)
+    /// Is `version` affected? `raw` is the version exactly as it appeared in the
+    /// lockfile, used only to match OSV's explicitly enumerated version lists,
+    /// whose entries are sometimes outside the ecosystem's version scheme.
+    pub fn affects(&self, version: &ParsedVersion, raw: &str) -> bool {
+        match &self.affected {
+            Affected::AllVersions => true,
+            Affected::Requirements {
+                patched,
+                unaffected,
+            } => {
+                let satisfies = |reqs: &[String]| reqs.iter().any(|r| version.satisfies(r));
+                !satisfies(patched) && !satisfies(unaffected)
+            }
+            Affected::Ranges {
+                intervals,
+                versions,
+            } => {
+                if intervals.iter().any(|i| i.contains(version)) {
+                    return true;
+                }
+                // Explicit version lists are compared as versions where both
+                // sides parse (so `0.20` and `0.20.0` agree), falling back to a
+                // literal string match for entries outside the scheme.
+                versions.iter().any(|v| {
+                    matches!(version.cmp_str(v), Some(std::cmp::Ordering::Equal)) || raw == v
+                })
+            }
+        }
     }
 
     /// Construct a minimal advisory for tests in other modules (e.g. SARIF
@@ -158,8 +250,10 @@ impl Advisory {
             title: title.to_string(),
             severity,
             cvss,
-            patched: Vec::new(),
-            unaffected: Vec::new(),
+            affected: Affected::Requirements {
+                patched: Vec::new(),
+                unaffected: Vec::new(),
+            },
         }
     }
 }
@@ -226,7 +320,7 @@ impl AdvisoryDb {
         };
         self.by_package
             .get(&(ecosystem.clone(), name.to_string()))
-            .map(|advs| advs.iter().filter(|a| a.affects(&parsed)).collect())
+            .map(|advs| advs.iter().filter(|a| a.affects(&parsed, version)).collect())
             .unwrap_or_default()
     }
 
@@ -427,8 +521,10 @@ fn parse_rustsec_advisory(path: &Path) -> Option<Advisory> {
         title,
         severity,
         cvss,
-        patched,
-        unaffected,
+        affected: Affected::Requirements {
+            patched,
+            unaffected,
+        },
     })
 }
 
@@ -519,24 +615,101 @@ fn parse_osv_json(path: &Path) -> Vec<Advisory> {
             raw_name.to_string()
         };
 
-        let mut patched = Vec::new();
-        let mut unaffected = Vec::new();
+        // Build one interval per introduced→fixed/last_affected span. Events
+        // within a range are ordered, and a range may open and close several
+        // times (rustls' RUSTSEC-2024-0336 covers three spans in a single
+        // range), so walk them sequentially rather than bucketing by event type.
+        let mut intervals: Vec<Interval> = Vec::new();
+        let mut has_git_range = false;
         if let Some(ranges) = aff.get("ranges").and_then(|r| r.as_array()) {
             for range in ranges {
-                if let Some(events) = range.get("events").and_then(|e| e.as_array()) {
-                    for ev in events {
-                        if let Some(introduced) = ev.get("introduced").and_then(|v| v.as_str()) {
-                            if introduced != "0" && introduced != "0.0.0" {
-                                unaffected.push(format!("< {}", introduced));
-                            }
+                // GIT ranges bound the vulnerability by commit, which says
+                // nothing about released version numbers. Skip them: an
+                // unevaluable range must contribute no matches, and must also
+                // not be mistaken for "no version information at all".
+                if range.get("type").and_then(|t| t.as_str()) == Some("GIT") {
+                    has_git_range = true;
+                    continue;
+                }
+                let events = match range.get("events").and_then(|e| e.as_array()) {
+                    Some(e) => e,
+                    None => continue,
+                };
+                let mut open: Option<Interval> = None;
+                for ev in events {
+                    if let Some(introduced) = ev.get("introduced").and_then(|v| v.as_str()) {
+                        // Close any span left open by a malformed event list.
+                        if let Some(prev) = open.take() {
+                            intervals.push(prev);
                         }
-                        if let Some(fixed) = ev.get("fixed").and_then(|v| v.as_str()) {
-                            patched.push(format!(">= {}", fixed));
-                        }
+                        // "0" / "0.0.0" / "0.0.0-0" are OSV's "from the
+                        // beginning" sentinels — an open lower bound.
+                        let lo = matches!(introduced, "0" | "0.0.0" | "0.0.0-0")
+                            .then(|| None)
+                            .unwrap_or_else(|| Some(introduced.to_string()));
+                        open = Some(Interval {
+                            introduced: lo,
+                            end: None,
+                            end_inclusive: false,
+                        });
                     }
+                    // `fixed` is exclusive; `last_affected` is inclusive.
+                    let close = ev
+                        .get("fixed")
+                        .and_then(|v| v.as_str())
+                        .map(|f| (f, false))
+                        .or_else(|| {
+                            ev.get("last_affected")
+                                .and_then(|v| v.as_str())
+                                .map(|l| (l, true))
+                        });
+                    if let Some((bound, inclusive)) = close {
+                        let mut iv = open.take().unwrap_or(Interval {
+                            introduced: None,
+                            end: None,
+                            end_inclusive: false,
+                        });
+                        iv.end = Some(bound.to_string());
+                        iv.end_inclusive = inclusive;
+                        intervals.push(iv);
+                    }
+                }
+                // A span left open at the end of the list runs to infinity.
+                if let Some(iv) = open.take() {
+                    intervals.push(iv);
                 }
             }
         }
+
+        let versions: Vec<String> = aff
+            .get("versions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // No ranges and no versions means the advisory qualifies nothing, so
+        // every version is affected — but only when there was genuinely no
+        // version information. A GIT-only entry *had* information we could not
+        // evaluate, and must not be promoted to "everything".
+        let affected = if intervals.is_empty() && versions.is_empty() {
+            if has_git_range {
+                Affected::Ranges {
+                    intervals,
+                    versions,
+                }
+            } else {
+                Affected::AllVersions
+            }
+        } else {
+            Affected::Ranges {
+                intervals,
+                versions,
+            }
+        };
 
         out.push(Advisory {
             id: id.clone(),
@@ -545,8 +718,7 @@ fn parse_osv_json(path: &Path) -> Vec<Advisory> {
             title: title.clone(),
             severity,
             cvss,
-            patched,
-            unaffected,
+            affected,
         });
     }
     out
@@ -669,8 +841,10 @@ mod tests {
             title: "test advisory".to_string(),
             severity: sev,
             cvss: None,
-            patched: patched.iter().map(|s| s.to_string()).collect(),
-            unaffected: unaffected.iter().map(|s| s.to_string()).collect(),
+            affected: Affected::Requirements {
+                patched: patched.iter().map(|s| s.to_string()).collect(),
+                unaffected: unaffected.iter().map(|s| s.to_string()).collect(),
+            },
         }
     }
 
@@ -698,18 +872,18 @@ mod tests {
     #[test]
     fn vulnerable_version_matches_patched_boundary() {
         let adv = advisory("foo", Severity::High, &[">= 1.2.0"], &[]);
-        assert!(adv.affects(&sv("1.1.9")), "below fix is affected");
-        assert!(!adv.affects(&sv("1.2.0")), "at fix is patched");
-        assert!(!adv.affects(&sv("1.3.0")), "above fix is patched");
+        assert!(adv.affects(&sv("1.1.9"), "1.1.9"), "below fix is affected");
+        assert!(!adv.affects(&sv("1.2.0"), "1.2.0"), "at fix is patched");
+        assert!(!adv.affects(&sv("1.3.0"), "1.3.0"), "above fix is patched");
     }
 
     #[test]
     fn unaffected_range_excludes_old_versions() {
         // Introduced at 1.0.0, fixed at 1.2.0: only [1.0.0, 1.2.0) is affected.
         let adv = advisory("foo", Severity::Medium, &[">= 1.2.0"], &["< 1.0.0"]);
-        assert!(!adv.affects(&sv("0.9.0")), "pre-introduction safe");
-        assert!(adv.affects(&sv("1.1.0")), "in-window affected");
-        assert!(!adv.affects(&sv("1.2.0")), "fixed safe");
+        assert!(!adv.affects(&sv("0.9.0"), "0.9.0"), "pre-introduction safe");
+        assert!(adv.affects(&sv("1.1.0"), "1.1.0"), "in-window affected");
+        assert!(!adv.affects(&sv("1.2.0"), "1.2.0"), "fixed safe");
     }
 
     #[test]
@@ -911,7 +1085,12 @@ Affected versions of this crate did not require the buffer wrapped in
         assert_eq!(adv.ecosystem, Ecosystem::Cargo);
         // Title lives in the prose, not the TOML.
         assert_eq!(adv.title, "Use-after-free in BodyStream due to lack of pinning");
-        assert_eq!(adv.patched, vec![">= 2.0.0-alpha.1".to_string()]);
+        match &adv.affected {
+            Affected::Requirements { patched, .. } => {
+                assert_eq!(patched, &vec![">= 2.0.0-alpha.1".to_string()]);
+            }
+            other => panic!("RustSec advisories use requirement semantics, got {other:?}"),
+        }
         // AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H => 7.5 High.
         assert_eq!(adv.severity, Severity::High);
         assert!((adv.cvss.unwrap() - 7.5).abs() < 0.05);
