@@ -20,6 +20,12 @@ use std::path::Path;
 
 use crate::scanner::{normalize_pypi_name, read_file_with_limit, MAX_MANIFEST_SIZE};
 
+/// Resolved package name -> version, as produced by every lockfile parser here.
+type ResolvedVersions = HashMap<String, String>;
+
+/// A lockfile parser, selected by the manifest sitting beside it.
+type LockParser = fn(&Path) -> Option<ResolvedVersions>;
+
 /// Parse a `Cargo.lock` into a map of crate name -> resolved version.
 ///
 /// Reuses the scanner's DoS-guarded reader (`MAX_MANIFEST_SIZE`). Returns `None`
@@ -65,6 +71,7 @@ pub fn resolve_from_sibling_lock(manifest_path: &Path) -> Option<HashMap<String,
 ///     (`node_modules/foo`, `node_modules/@scope/bar`, nested paths). The
 ///     package name is the segment after the last `node_modules/`.
 ///   - v1: the legacy nested `dependencies` map, walked recursively.
+///
 /// When both are present (v2 keeps `dependencies` for back-compat), `packages`
 /// wins. First occurrence of a name is kept. Returns `None` on unreadable,
 /// oversized, or non-JSON input.
@@ -206,7 +213,7 @@ pub fn resolve_pypi_from_sibling_lock(manifest_path: &Path) -> Option<HashMap<St
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    let (lock_name, parse): (&str, fn(&Path) -> Option<HashMap<String, String>>) = match manifest {
+    let (lock_name, parse): (&str, LockParser) = match manifest {
         "pyproject.toml" => ("poetry.lock", parse_poetry_lock),
         "Pipfile" => ("Pipfile.lock", parse_pipfile_lock),
         _ => return None,

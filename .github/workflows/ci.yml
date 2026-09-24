@@ -8,10 +8,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # `-D warnings` is still NOT set. The four rustc warnings inherited from the
-  # monorepo are now cleared, but `cargo clippy --all-targets` reports ~21 lints,
-  # and `-D warnings` denies those too. Clear the clippy set, then set this and
-  # drop `continue-on-error` from the style job in the same commit.
+  # Warnings are now errors everywhere. The tree is rustc-clean, clippy-clean and
+  # rustfmt-clean as of this commit, so the ratchet starts here: the cost of
+  # keeping it that way is one lint at a time, and the cost of not doing so is
+  # the 21-lint backlog this just cleared.
+  #
+  # Note the trade-off this accepts: `dtolnay/rust-toolchain@stable` floats, so a
+  # new stable release that adds or widens a lint will fail CI on a commit that
+  # changed nothing. That is the intended alarm, not a malfunction — fix the lint,
+  # or pin the toolchain here if the interruptions outweigh the discipline.
+  RUSTFLAGS: -D warnings
 
 jobs:
   # Portability is a product claim, so prove it on every push. There is no
@@ -54,13 +60,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo package --locked
 
-  # Advisory only. The scanner sources were moved verbatim from the monorepo,
-  # which never enforced rustfmt, so `cargo fmt --check` currently reports a
-  # large diff. Reformatting during extraction would destroy the verbatim-move
-  # property that makes this port reviewable. Land a dedicated formatting commit
-  # after extraction, then delete `continue-on-error` from both steps below.
+  # Blocking since the formatting and lint backlog inherited from the monorepo
+  # was cleared. It was advisory until then because reformatting during the
+  # extraction would have destroyed the verbatim-move property that made the
+  # port reviewable; that constraint is spent, so the job enforces now.
   style:
-    name: style (advisory)
+    name: style
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +75,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: rustfmt
         run: cargo fmt --check
-        continue-on-error: true
       - name: clippy
         run: cargo clippy --locked --all-targets
-        continue-on-error: true

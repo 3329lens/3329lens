@@ -50,7 +50,7 @@ fn osv_corpus_matches_independent_reference() {
     };
 
     let db = AdvisoryDb::load_from_dir(&corpus).expect("corpus loads");
-    assert!(db.len() > 0, "corpus loaded no advisories");
+    assert!(!db.is_empty(), "corpus loaded no advisories");
     eprintln!("loaded {} advisories from {}", db.len(), corpus.display());
 
     let raw = std::fs::read_to_string(&cases).expect("cases file readable");

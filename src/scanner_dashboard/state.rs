@@ -28,6 +28,12 @@ pub struct LibraryStore {
     by_name: BTreeMap<String, usize>,
 }
 
+impl Default for LibraryStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LibraryStore {
     pub fn new() -> Self {
         Self {
@@ -45,13 +51,13 @@ impl LibraryStore {
         // Update category index
         self.by_category
             .entry(library.category.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(idx);
 
         // Update risk index
         self.by_risk
             .entry(library.risk_level.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(idx);
 
         // Update name index
@@ -232,23 +238,12 @@ pub enum ViewMode {
     Statistics,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct LibraryFilter {
     pub categories: Option<Vec<LibraryCategory>>,
     pub risk_levels: Option<Vec<RiskLevel>>,
     pub show_quantum_vulnerable_only: bool,
     pub name_pattern: Option<String>,
-}
-
-impl Default for LibraryFilter {
-    fn default() -> Self {
-        Self {
-            categories: None,
-            risk_levels: None,
-            show_quantum_vulnerable_only: false,
-            name_pattern: None,
-        }
-    }
 }
 
 impl LibraryFilter {
@@ -1015,8 +1010,7 @@ impl ScannerDashboardState {
         if !pq_ready.is_empty() {
             writeln!(
                 output,
-                "## {} Post-Quantum Ready Libraries ({} libraries)",
-                "✅",
+                "## ✅ Post-Quantum Ready Libraries ({} libraries)",
                 pq_ready.len()
             )
             .unwrap();
@@ -1179,8 +1173,8 @@ impl ScannerDashboardState {
             let path = escape_csv_field(&lib.path.display().to_string());
             let category = escape_csv_field(lib.category.name());
             let lib_type = escape_csv_field(&format!("{:?}", lib.library_type));
-            let version = escape_csv_field(&lib.version.as_deref().unwrap_or("N/A"));
-            let vendor = escape_csv_field(&lib.vendor.as_deref().unwrap_or("N/A"));
+            let version = escape_csv_field(lib.version.as_deref().unwrap_or("N/A"));
+            let vendor = escape_csv_field(lib.vendor.as_deref().unwrap_or("N/A"));
             let risk_level = escape_csv_field(lib.risk_level.label());
             let quantum_vuln = if lib.quantum_vulnerable { "Yes" } else { "No" };
             let current_algo_escaped = escape_csv_field(current_algo);

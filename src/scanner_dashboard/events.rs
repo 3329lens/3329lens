@@ -33,14 +33,14 @@ fn handle_key_event(
     use crate::scanner_dashboard::state::LibraryCategory;
 
     // If completion notification is shown, Space or Enter dismisses it
-    if state.completion_notification_shown {
-        if matches!(key.code, KeyCode::Char(' ') | KeyCode::Enter) {
-            state.dismiss_completion_notification();
-            return Ok(AppAction::Continue);
-        }
-        // Allow 'e' and 'v' for exports even when notification is shown
-        // (handled in the match below)
+    if state.completion_notification_shown
+        && matches!(key.code, KeyCode::Char(' ') | KeyCode::Enter)
+    {
+        state.dismiss_completion_notification();
+        return Ok(AppAction::Continue);
     }
+    // Allow 'e' and 'v' for exports even when notification is shown
+    // (handled in the match below)
 
     match key.code {
         // Quit - but close overlays first if open (completion, help, detail, then quit)

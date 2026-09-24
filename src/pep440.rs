@@ -67,6 +67,19 @@ enum PreKey {
     Final,
 }
 
+/// The total-order key for a [`Version`], mirroring `packaging`'s `_cmpkey`:
+/// epoch, significant release segments, pre/dev marker, post number, dev
+/// marker, then local segments. Tuple ordering does the comparison, so the
+/// field order here *is* the precedence rule.
+type VersionKey<'a> = (
+    u64,
+    &'a [u64],
+    PreKey,
+    Option<u64>,
+    (bool, u64),
+    &'a [LocalSegment],
+);
+
 /// Anchored spec regex (lowercased input), per the PEP 440 appendix.
 fn version_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -166,16 +179,7 @@ impl Version {
     /// Ordering key per the spec: trailing zeros in the release are
     /// insignificant (`1.0 == 1.0.0`); dev/pre/post markers order around the
     /// final release; local segments break remaining ties.
-    fn key(
-        &self,
-    ) -> (
-        u64,
-        &[u64],
-        PreKey,
-        Option<u64>,
-        (bool, u64),
-        &[LocalSegment],
-    ) {
+    fn key(&self) -> VersionKey<'_> {
         let mut end = self.release.len();
         while end > 1 && self.release[end - 1] == 0 {
             end -= 1;

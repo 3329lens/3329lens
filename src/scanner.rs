@@ -115,7 +115,7 @@ fn extract_toml_version(value: &toml::Value) -> Option<String> {
 fn clean_version_req(raw: &str) -> Option<String> {
     let trimmed = raw
         .trim()
-        .trim_start_matches(|c| matches!(c, '^' | '~' | '=' | '>' | '<' | ' '))
+        .trim_start_matches(['^', '~', '=', '>', '<', ' '])
         .trim();
     if trimmed.is_empty() {
         None
@@ -355,7 +355,7 @@ fn pypi_findings_from_requirements(content: &str, path: &Path) -> Vec<CryptoFind
             // Exact pin: take the version token, stopping at any marker/extra.
             let ver = rest
                 .trim()
-                .split(|c: char| matches!(c, ' ' | ';' | ','))
+                .split([' ', ';', ','])
                 .next()
                 .unwrap_or("")
                 .trim();
@@ -527,6 +527,12 @@ pub enum CryptoType {
 pub struct CryptoScanner {
     findings: Vec<CryptoFinding>,
     library_patterns: HashMap<String, CryptoType>,
+}
+
+impl Default for CryptoScanner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CryptoScanner {
@@ -1262,68 +1268,64 @@ impl CryptoScanner {
             Err(e) => return Err(e),
         };
 
-        match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(parsed) => {
-                let crypto_packages = npm_crypto_packages();
-                let lock = crate::lockfile::resolve_npm_from_sibling_lock(path);
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+            let crypto_packages = npm_crypto_packages();
+            let lock = crate::lockfile::resolve_npm_from_sibling_lock(path);
 
-                let mut declared: std::collections::HashSet<&str> =
-                    std::collections::HashSet::new();
+            let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
 
-                if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
-                    for (pkg_name, crypto_type) in &crypto_packages {
-                        if let Some(ver_value) = deps.get(*pkg_name) {
-                            declared.insert(*pkg_name);
-                            let (version, version_source) = resolve_version(
-                                ver_value.as_str().and_then(clean_version_req),
-                                lock.as_ref().and_then(|l| l.get(*pkg_name).cloned()),
-                            );
-                            let finding = CryptoFinding {
-                                path: path.display().to_string(),
-                                name: pkg_name.to_string(),
-                                finding_type: FindingType::DependencyManifest,
-                                crypto_type: crypto_type.clone(),
-                                ecosystem: Ecosystem::Npm,
-                                version,
-                                version_source,
-                                details: format!("Node.js package dependency: {}", pkg_name),
-                            };
+            if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
+                for (pkg_name, crypto_type) in &crypto_packages {
+                    if let Some(ver_value) = deps.get(*pkg_name) {
+                        declared.insert(*pkg_name);
+                        let (version, version_source) = resolve_version(
+                            ver_value.as_str().and_then(clean_version_req),
+                            lock.as_ref().and_then(|l| l.get(*pkg_name).cloned()),
+                        );
+                        let finding = CryptoFinding {
+                            path: path.display().to_string(),
+                            name: pkg_name.to_string(),
+                            finding_type: FindingType::DependencyManifest,
+                            crypto_type: crypto_type.clone(),
+                            ecosystem: Ecosystem::Npm,
+                            version,
+                            version_source,
+                            details: format!("Node.js package dependency: {}", pkg_name),
+                        };
 
-                            let library_info = self.finding_to_library_info(&finding);
-                            self.findings.push(finding);
-                            callback(StreamingScanEvent::LibraryFound(library_info));
-                        }
-                    }
-                }
-
-                if let Some(lock) = lock.as_ref() {
-                    for (pkg_name, crypto_type) in &crypto_packages {
-                        if declared.contains(*pkg_name) {
-                            continue;
-                        }
-                        if let Some(version) = lock.get(*pkg_name) {
-                            let finding = CryptoFinding {
-                                path: path.display().to_string(),
-                                name: pkg_name.to_string(),
-                                finding_type: FindingType::TransitiveDependency,
-                                crypto_type: crypto_type.clone(),
-                                ecosystem: Ecosystem::Npm,
-                                version: Some(version.clone()),
-                                version_source: VersionSource::Locked,
-                                details: format!(
-                                    "Transitive Node.js package (from package-lock.json): {}",
-                                    pkg_name
-                                ),
-                            };
-
-                            let library_info = self.finding_to_library_info(&finding);
-                            self.findings.push(finding);
-                            callback(StreamingScanEvent::LibraryFound(library_info));
-                        }
+                        let library_info = self.finding_to_library_info(&finding);
+                        self.findings.push(finding);
+                        callback(StreamingScanEvent::LibraryFound(library_info));
                     }
                 }
             }
-            Err(_) => {}
+
+            if let Some(lock) = lock.as_ref() {
+                for (pkg_name, crypto_type) in &crypto_packages {
+                    if declared.contains(*pkg_name) {
+                        continue;
+                    }
+                    if let Some(version) = lock.get(*pkg_name) {
+                        let finding = CryptoFinding {
+                            path: path.display().to_string(),
+                            name: pkg_name.to_string(),
+                            finding_type: FindingType::TransitiveDependency,
+                            crypto_type: crypto_type.clone(),
+                            ecosystem: Ecosystem::Npm,
+                            version: Some(version.clone()),
+                            version_source: VersionSource::Locked,
+                            details: format!(
+                                "Transitive Node.js package (from package-lock.json): {}",
+                                pkg_name
+                            ),
+                        };
+
+                        let library_info = self.finding_to_library_info(&finding);
+                        self.findings.push(finding);
+                        callback(StreamingScanEvent::LibraryFound(library_info));
+                    }
+                }
+            }
         }
 
         Ok(())
