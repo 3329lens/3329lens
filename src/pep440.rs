@@ -268,10 +268,9 @@ impl Requirement {
             (Op::Ne, r)
         } else if let Some(r) = s.strip_prefix('>') {
             (Op::Gt, r)
-        } else if let Some(r) = s.strip_prefix('<') {
-            (Op::Lt, r)
         } else {
-            return None;
+            let r = s.strip_prefix('<')?;
+            (Op::Lt, r)
         };
         Some(Requirement {
             op,

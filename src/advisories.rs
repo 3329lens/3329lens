@@ -390,7 +390,7 @@ impl CorrelationResult {
             *counts.entry(adv.severity).or_insert(0) += 1;
         }
         let mut out: Vec<_> = counts.into_iter().collect();
-        out.sort_by(|a, b| b.0.cmp(&a.0));
+        out.sort_by_key(|&(severity, _)| std::cmp::Reverse(severity));
         out
     }
 }

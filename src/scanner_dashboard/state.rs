@@ -552,8 +552,8 @@ impl ScannerDashboardState {
             SortBy::Name => libs.sort_by(|a, b| a.name.cmp(&b.name)),
             SortBy::Category => libs.sort_by(|a, b| a.category.name().cmp(b.category.name())),
             SortBy::Risk => libs.sort_by(|a, b| b.risk_level.cmp(&a.risk_level)), // High to low
-            SortBy::Size => libs.sort_by(|a, b| b.size.cmp(&a.size)),             // Large to small
-            SortBy::Date => libs.sort_by(|a, b| b.modified.cmp(&a.modified)),     // Newest first
+            SortBy::Size => libs.sort_by_key(|l| std::cmp::Reverse(l.size)),      // Large to small
+            SortBy::Date => libs.sort_by_key(|l| std::cmp::Reverse(l.modified)),  // Newest first
         }
     }
 
