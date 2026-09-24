@@ -134,7 +134,11 @@ fn relativize(path: &str, root: &str) -> String {
     match p.strip_prefix(r) {
         Ok(rel) => {
             let s = rel.to_string_lossy().to_string();
-            if s.is_empty() { ".".to_string() } else { s }
+            if s.is_empty() {
+                ".".to_string()
+            } else {
+                s
+            }
         }
         Err(_) => path.to_string(),
     }
@@ -189,7 +193,11 @@ pub fn build(correlation: &CorrelationResult, root: &str) -> SarifLog {
                         "{}@{}: {} ({}, {})",
                         m.name,
                         m.version,
-                        if adv.title.is_empty() { adv.id.as_str() } else { adv.title.as_str() },
+                        if adv.title.is_empty() {
+                            adv.id.as_str()
+                        } else {
+                            adv.title.as_str()
+                        },
                         adv.id,
                         adv.severity.as_str()
                     ),
@@ -247,7 +255,10 @@ mod tests {
     }
 
     fn result_with(matches: Vec<FindingMatch>) -> CorrelationResult {
-        CorrelationResult { matches, skipped_unresolved: 0 }
+        CorrelationResult {
+            matches,
+            skipped_unresolved: 0,
+        }
     }
 
     #[test]
@@ -331,9 +342,15 @@ mod tests {
 
     #[test]
     fn help_uri_derived_for_known_id_schemes() {
-        assert!(advisory_help_uri("RUSTSEC-2021-0001").unwrap().contains("rustsec.org"));
-        assert!(advisory_help_uri("CVE-2020-0001").unwrap().contains("nvd.nist.gov"));
-        assert!(advisory_help_uri("GHSA-aaaa-bbbb-cccc").unwrap().contains("github.com/advisories"));
+        assert!(advisory_help_uri("RUSTSEC-2021-0001")
+            .unwrap()
+            .contains("rustsec.org"));
+        assert!(advisory_help_uri("CVE-2020-0001")
+            .unwrap()
+            .contains("nvd.nist.gov"));
+        assert!(advisory_help_uri("GHSA-aaaa-bbbb-cccc")
+            .unwrap()
+            .contains("github.com/advisories"));
         assert!(advisory_help_uri("UNKNOWN-1").is_none());
     }
 }

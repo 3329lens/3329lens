@@ -4,8 +4,8 @@
  * Provides specialized UI components for the scanner dashboard
  */
 
-use ratatui::text::{Line, Span};
 use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 
 /// Create an ASCII bar chart from a value and maximum
 ///
@@ -66,10 +66,7 @@ pub fn create_labeled_bar(
 /// # Arguments
 /// * `data` - Vector of (label, value, color) tuples
 /// * `bar_width` - The width of each bar in characters
-pub fn create_bar_chart(
-    data: Vec<(&str, usize, Color)>,
-    bar_width: usize,
-) -> Vec<Line<'static>> {
+pub fn create_bar_chart(data: Vec<(&str, usize, Color)>, bar_width: usize) -> Vec<Line<'static>> {
     if data.is_empty() {
         return vec![Line::from(Span::styled(
             "  No data available",
@@ -80,9 +77,7 @@ pub fn create_bar_chart(
     let total: usize = data.iter().map(|(_, v, _)| *v).sum();
 
     data.into_iter()
-        .map(|(label, value, color)| {
-            create_labeled_bar(label, value, total, bar_width, color)
-        })
+        .map(|(label, value, color)| create_labeled_bar(label, value, total, bar_width, color))
         .collect()
 }
 
@@ -118,7 +113,12 @@ pub fn format_duration(seconds: u64) -> String {
     } else if seconds < 3600 {
         format!("{}m {:02}s", seconds / 60, seconds % 60)
     } else {
-        format!("{}h {:02}m {:02}s", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+        format!(
+            "{}h {:02}m {:02}s",
+            seconds / 3600,
+            (seconds % 3600) / 60,
+            seconds % 60
+        )
     }
 }
 

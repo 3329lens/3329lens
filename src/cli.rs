@@ -43,7 +43,9 @@ fn canonicalize_scan_path(path: &str) -> Result<std::path::PathBuf, Box<dyn std:
 
 #[derive(Parser)]
 #[command(name = "3329lens")]
-#[command(about = "Cryptographic inventory scanner — discovery, CVE correlation, CBOM/SARIF export")]
+#[command(
+    about = "Cryptographic inventory scanner — discovery, CVE correlation, CBOM/SARIF export"
+)]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]
@@ -92,28 +94,57 @@ pub enum Commands {
 /// Dispatch a parsed command.
 pub fn run(cmd: Commands) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
-        Commands::Scan { path, depth, format, output, advisory_db, fail_on } => {
-            handle_scan(&path, depth, &format, output.as_deref(), advisory_db.as_deref(), &fail_on)
-        }
-        Commands::ScannerDashboard { path, depth, refresh_rate } => {
-            handle_scanner_dashboard(&path, depth, refresh_rate)
-        }
+        Commands::Scan {
+            path,
+            depth,
+            format,
+            output,
+            advisory_db,
+            fail_on,
+        } => handle_scan(
+            &path,
+            depth,
+            &format,
+            output.as_deref(),
+            advisory_db.as_deref(),
+            &fail_on,
+        ),
+        Commands::ScannerDashboard {
+            path,
+            depth,
+            refresh_rate,
+        } => handle_scanner_dashboard(&path, depth, refresh_rate),
     }
 }
 
-fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&str>, advisory_db: Option<&str>, fail_on: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_scan(
+    path: &str,
+    depth: Option<usize>,
+    format: &str,
+    output: Option<&str>,
+    advisory_db: Option<&str>,
+    fail_on: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     use scanner_core::advisories::{AdvisoryDb, CorrelationResult, Severity};
 
     // Parse the CI gating threshold up front so an invalid value fails fast.
     let fail_threshold = Severity::parse(fail_on).ok_or_else(|| {
-        format!("Invalid --fail-on value '{}'. Use: none, low, medium, high, critical.", fail_on)
+        format!(
+            "Invalid --fail-on value '{}'. Use: none, low, medium, high, critical.",
+            fail_on
+        )
     })?;
     // Canonicalize path to prevent directory traversal attacks
     // This resolves ../../../etc type paths and validates existence
     let canonical_path = canonicalize_scan_path(path)?;
     let path_str = canonical_path.to_string_lossy();
 
-    println!("{}", format!("🔍 Scanning for cryptographic libraries in: {}", path_str).bold().cyan());
+    println!(
+        "{}",
+        format!("🔍 Scanning for cryptographic libraries in: {}", path_str)
+            .bold()
+            .cyan()
+    );
     if path != path_str.as_ref() {
         println!("  (resolved from: {})", path.italic());
     }
@@ -134,19 +165,64 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
     let findings = scanner.get_findings();
     let stats = scanner.get_statistics();
 
-    println!("\n{}", format!("✅ Scan complete in {:.2}s", duration.as_secs_f64()).bold().green());
+    println!(
+        "\n{}",
+        format!("✅ Scan complete in {:.2}s", duration.as_secs_f64())
+            .bold()
+            .green()
+    );
     println!("\n{}", "📊 Statistics:".bold().yellow());
-    println!("  Total findings: {}", stats.get("total").unwrap_or(&0).to_string().cyan());
-    println!("  Binary libraries: {}", stats.get("binary_libraries").unwrap_or(&0).to_string().cyan());
-    println!("  Static libraries: {}", stats.get("static_libraries").unwrap_or(&0).to_string().cyan());
-    println!("  Dependency manifests: {}", stats.get("manifests").unwrap_or(&0).to_string().cyan());
+    println!(
+        "  Total findings: {}",
+        stats.get("total").unwrap_or(&0).to_string().cyan()
+    );
+    println!(
+        "  Binary libraries: {}",
+        stats
+            .get("binary_libraries")
+            .unwrap_or(&0)
+            .to_string()
+            .cyan()
+    );
+    println!(
+        "  Static libraries: {}",
+        stats
+            .get("static_libraries")
+            .unwrap_or(&0)
+            .to_string()
+            .cyan()
+    );
+    println!(
+        "  Dependency manifests: {}",
+        stats.get("manifests").unwrap_or(&0).to_string().cyan()
+    );
     println!("\n{}", "🔐 By Category:".bold().yellow());
-    println!("  SSL/TLS: {}", stats.get("ssl_tls").unwrap_or(&0).to_string().green());
-    println!("  General Crypto: {}", stats.get("general_crypto").unwrap_or(&0).to_string().green());
-    println!("  Post-Quantum: {}", stats.get("post_quantum").unwrap_or(&0).to_string().magenta());
+    println!(
+        "  SSL/TLS: {}",
+        stats.get("ssl_tls").unwrap_or(&0).to_string().green()
+    );
+    println!(
+        "  General Crypto: {}",
+        stats
+            .get("general_crypto")
+            .unwrap_or(&0)
+            .to_string()
+            .green()
+    );
+    println!(
+        "  Post-Quantum: {}",
+        stats
+            .get("post_quantum")
+            .unwrap_or(&0)
+            .to_string()
+            .magenta()
+    );
     let transitive = *stats.get("transitive").unwrap_or(&0);
     if transitive > 0 {
-        println!("  Transitive (from lockfiles): {}", transitive.to_string().cyan());
+        println!(
+            "  Transitive (from lockfiles): {}",
+            transitive.to_string().cyan()
+        );
     }
 
     // Optional advisory / CVE correlation against lockfile-resolved versions.
@@ -166,29 +242,44 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
                 .into());
             }
 
-            println!("\n{}", format!("🛡️  Loaded {} advisories from {}", db.len(), db_path).bold().cyan());
+            println!(
+                "\n{}",
+                format!("🛡️  Loaded {} advisories from {}", db.len(), db_path)
+                    .bold()
+                    .cyan()
+            );
             let result = scanner_core::advisories::correlate(&db, findings);
 
-            println!("\n{}", "🛡️  Vulnerabilities (resolved versions only):".bold().yellow());
+            println!(
+                "\n{}",
+                "🛡️  Vulnerabilities (resolved versions only):"
+                    .bold()
+                    .yellow()
+            );
             if result.matches.is_empty() {
                 println!("  {}", "No known vulnerabilities matched.".green());
             } else {
                 for (severity, count) in result.counts_by_severity() {
                     let label = format!("  {}: {}", severity.as_str(), count);
-                    println!("{}", match severity {
-                        Severity::Critical | Severity::High => label.red(),
-                        Severity::Medium => label.yellow(),
-                        _ => label.normal(),
-                    });
+                    println!(
+                        "{}",
+                        match severity {
+                            Severity::Critical | Severity::High => label.red(),
+                            Severity::Medium => label.yellow(),
+                            _ => label.normal(),
+                        }
+                    );
                 }
                 for m in &result.matches {
                     for adv in &m.advisories {
-                        println!("    {} {}@{} — {} ({})",
+                        println!(
+                            "    {} {}@{} — {} ({})",
                             "•".red(),
                             m.name.bold(),
                             m.version,
                             adv.id.yellow(),
-                            adv.severity.as_str());
+                            adv.severity.as_str()
+                        );
                     }
                 }
             }
@@ -218,7 +309,10 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
             if let Some(output_path) = output {
                 let mut file = File::create(output_path)?;
                 file.write_all(json_output.as_bytes())?;
-                println!("\n{}", format!("💾 Results saved to: {}", output_path).green());
+                println!(
+                    "\n{}",
+                    format!("💾 Results saved to: {}", output_path).green()
+                );
             } else {
                 println!("\n{}", "📄 JSON Output:".bold().yellow());
                 println!("{}", json_output);
@@ -245,7 +339,8 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
                         scanner_core::scanner::CryptoType::Unknown => "white",
                     };
 
-                    println!("\n{}. {} {}",
+                    println!(
+                        "\n{}. {} {}",
                         (i + 1).to_string().bold(),
                         type_icon,
                         finding.path.color(crypto_color)
@@ -258,10 +353,16 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
                     for finding in findings {
                         writeln!(file, "{:?}", finding)?;
                     }
-                    println!("\n{}", format!("💾 Results saved to: {}", output_path).green());
+                    println!(
+                        "\n{}",
+                        format!("💾 Results saved to: {}", output_path).green()
+                    );
                 }
             } else {
-                println!("\n{}", "ℹ️  No cryptographic libraries found in the specified path.".yellow());
+                println!(
+                    "\n{}",
+                    "ℹ️  No cryptographic libraries found in the specified path.".yellow()
+                );
             }
         }
         "cbom" => {
@@ -271,20 +372,32 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
             // cryptographic strength, so the OS entropy source is sufficient.
             let mut uuid_bytes = [0u8; 16];
             getrandom::getrandom(&mut uuid_bytes)?;
-            bom.serial_number = Some(format!("urn:uuid:{}", scanner_core::cbom::format_uuid_v4(uuid_bytes)));
+            bom.serial_number = Some(format!(
+                "urn:uuid:{}",
+                scanner_core::cbom::format_uuid_v4(uuid_bytes)
+            ));
 
             // Quick summary of inferred algorithm assets and quantum exposure.
-            let crypto_assets = bom.components.iter()
-                .filter(|c| c.component_type == scanner_core::cbom::ComponentType::CryptographicAsset)
+            let crypto_assets = bom
+                .components
+                .iter()
+                .filter(|c| {
+                    c.component_type == scanner_core::cbom::ComponentType::CryptographicAsset
+                })
                 .count();
-            let quantum_vulnerable = bom.components.iter()
+            let quantum_vulnerable = bom
+                .components
+                .iter()
                 .filter_map(|c| c.crypto_properties.as_ref())
                 .filter_map(|p| p.algorithm_properties.as_ref())
                 .filter(|a| a.nist_quantum_security_level == Some(0))
                 .count();
             println!("\n{}", "🧬 Inferred Cryptographic Assets:".bold().yellow());
             println!("  Algorithms: {}", crypto_assets.to_string().cyan());
-            println!("  Quantum-vulnerable (Shor-breakable): {}", quantum_vulnerable.to_string().red());
+            println!(
+                "  Quantum-vulnerable (Shor-breakable): {}",
+                quantum_vulnerable.to_string().red()
+            );
 
             // Attach correlated advisories to CycloneDX's native
             // `vulnerabilities` array, linked to the affected library.
@@ -299,8 +412,13 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
                                 severity: adv.severity.as_str().to_string(),
                                 method: adv.cvss.map(|_| "CVSSv3".to_string()),
                             }],
-                            description: if adv.title.is_empty() { None } else { Some(adv.title.clone()) },
-                            affects: bom_ref.iter()
+                            description: if adv.title.is_empty() {
+                                None
+                            } else {
+                                Some(adv.title.clone())
+                            },
+                            affects: bom_ref
+                                .iter()
                                 .map(|r| scanner_core::cbom::Affects { bom_ref: r.clone() })
                                 .collect(),
                         });
@@ -313,7 +431,10 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
             if let Some(output_path) = output {
                 let mut file = File::create(output_path)?;
                 file.write_all(json_output.as_bytes())?;
-                println!("\n{}", format!("💾 CycloneDX CBOM saved to: {}", output_path).green());
+                println!(
+                    "\n{}",
+                    format!("💾 CycloneDX CBOM saved to: {}", output_path).green()
+                );
             } else {
                 println!("\n{}", "📄 CycloneDX CBOM (1.6):".bold().yellow());
                 println!("{}", json_output);
@@ -335,14 +456,21 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
             if let Some(output_path) = output {
                 let mut file = File::create(output_path)?;
                 file.write_all(json_output.as_bytes())?;
-                println!("\n{}", format!("💾 SARIF 2.1.0 saved to: {}", output_path).green());
+                println!(
+                    "\n{}",
+                    format!("💾 SARIF 2.1.0 saved to: {}", output_path).green()
+                );
             } else {
                 println!("\n{}", "📄 SARIF (2.1.0):".bold().yellow());
                 println!("{}", json_output);
             }
         }
         _ => {
-            return Err(format!("Unknown output format: {}. Use 'text', 'json', 'cbom', or 'sarif'.", format).into());
+            return Err(format!(
+                "Unknown output format: {}. Use 'text', 'json', 'cbom', or 'sarif'.",
+                format
+            )
+            .into());
         }
     }
 
@@ -364,13 +492,20 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
     Ok(())
 }
 
-fn handle_scanner_dashboard(path: &str, depth: Option<usize>, refresh_rate: u64) -> Result<(), Box<dyn std::error::Error>> {
+fn handle_scanner_dashboard(
+    path: &str,
+    depth: Option<usize>,
+    refresh_rate: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Canonicalize path to prevent directory traversal attacks
     // This resolves ../../../etc type paths and validates existence
     let canonical_path = canonicalize_scan_path(path)?;
 
     println!("{}", "🔍 Starting Scanner Dashboard...".bold().cyan());
-    println!("{}", format!("  Scanning: {}", canonical_path.display()).italic());
+    println!(
+        "{}",
+        format!("  Scanning: {}", canonical_path.display()).italic()
+    );
     if path != canonical_path.to_string_lossy().as_ref() {
         println!("{}", format!("  (resolved from: {})", path).italic());
     }

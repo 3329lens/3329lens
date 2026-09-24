@@ -38,7 +38,9 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use crate::pep440;
-use crate::scanner::{read_file_with_limit, CryptoFinding, Ecosystem, VersionSource, MAX_MANIFEST_SIZE};
+use crate::scanner::{
+    read_file_with_limit, CryptoFinding, Ecosystem, VersionSource, MAX_MANIFEST_SIZE,
+};
 
 /// A version parsed under its ecosystem's scheme: semver for crates.io and
 /// npm, PEP 440 for PyPI. Parsing once up front lets every advisory for the
@@ -245,7 +247,12 @@ impl Advisory {
     /// Construct a minimal advisory for tests in other modules (e.g. SARIF
     /// output), which cannot reach the private `patched`/`unaffected` fields.
     #[cfg(test)]
-    pub(crate) fn for_test(id: &str, severity: Severity, cvss: Option<f32>, title: &str) -> Advisory {
+    pub(crate) fn for_test(
+        id: &str,
+        severity: Severity,
+        cvss: Option<f32>,
+        title: &str,
+    ) -> Advisory {
         Advisory {
             id: id.to_string(),
             ecosystem: Ecosystem::Cargo,
@@ -323,7 +330,11 @@ impl AdvisoryDb {
         };
         self.by_package
             .get(&(ecosystem.clone(), name.to_string()))
-            .map(|advs| advs.iter().filter(|a| a.affects(&parsed, version)).collect())
+            .map(|advs| {
+                advs.iter()
+                    .filter(|a| a.affects(&parsed, version))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -532,8 +543,11 @@ fn parse_rustsec_advisory(path: &Path) -> Option<Advisory> {
 }
 
 fn toml_str_array(v: &toml::Value) -> Option<Vec<String>> {
-    v.as_array()
-        .map(|arr| arr.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+    v.as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect()
+    })
 }
 
 /// Map an OSV `ecosystem` string to our [`Ecosystem`]. Only the ecosystems we
@@ -567,7 +581,11 @@ fn parse_osv_json(path: &Path) -> Vec<Advisory> {
         Err(_) => return Vec::new(),
     };
 
-    let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = val
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let title = val
         .get("summary")
         .and_then(|v| v.as_str())
@@ -583,7 +601,9 @@ fn parse_osv_json(path: &Path) -> Vec<Advisory> {
             arr.iter().find_map(|s| {
                 let ty = s.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 if ty.starts_with("CVSS_V3") {
-                    s.get("score").and_then(|sc| sc.as_str()).and_then(cvss_base_score)
+                    s.get("score")
+                        .and_then(|sc| sc.as_str())
+                        .and_then(cvss_base_score)
                 } else {
                     None
                 }
@@ -899,7 +919,7 @@ mod tests {
         let findings = vec![
             locked_finding("foo", "1.0.0"),
             locked_finding("foo", "1.0.0"), // duplicate, should dedup
-            declared,                        // declared, should be skipped (counted)
+            declared,                       // declared, should be skipped (counted)
             locked_finding("safe", "1.0.0"),
         ];
 
@@ -915,10 +935,16 @@ mod tests {
         // Same package name, vulnerable on npm only. A PyPI package of the same
         // name+version must not pick up the npm advisory, and vice versa.
         let mut db = AdvisoryDb::default();
-        db.insert(advisory_in(Ecosystem::Npm, "shared", Severity::High, &[">= 2.0.0"], &[]));
+        db.insert(advisory_in(
+            Ecosystem::Npm,
+            "shared",
+            Severity::High,
+            &[">= 2.0.0"],
+            &[],
+        ));
 
         let findings = vec![
-            locked_finding_in(Ecosystem::Npm, "shared", "1.0.0"),  // vulnerable
+            locked_finding_in(Ecosystem::Npm, "shared", "1.0.0"), // vulnerable
             locked_finding_in(Ecosystem::PyPI, "shared", "1.0.0"), // unrelated ecosystem
             locked_finding_in(Ecosystem::Cargo, "shared", "1.0.0"), // unrelated ecosystem
         ];
@@ -948,7 +974,13 @@ mod tests {
         // An OSV PyPI advisory keyed by the canonical (normalized) name must
         // match a finding whose name is likewise normalized.
         let mut db = AdvisoryDb::default();
-        db.insert(advisory_in(Ecosystem::PyPI, "pynacl", Severity::High, &[">= 1.5.0"], &[]));
+        db.insert(advisory_in(
+            Ecosystem::PyPI,
+            "pynacl",
+            Severity::High,
+            &[">= 1.5.0"],
+            &[],
+        ));
 
         let findings = vec![locked_finding_in(Ecosystem::PyPI, "pynacl", "1.4.0")];
         let res = correlate(&db, &findings);
@@ -979,20 +1011,24 @@ mod tests {
             "short release segment is affected"
         );
         assert_eq!(
-            db.matches(&Ecosystem::PyPI, "cryptography", "39.0.1rc1").len(),
+            db.matches(&Ecosystem::PyPI, "cryptography", "39.0.1rc1")
+                .len(),
             1,
             "pre-release of the fix predates the fix"
         );
         assert!(
-            db.matches(&Ecosystem::PyPI, "cryptography", "39.0.1").is_empty(),
+            db.matches(&Ecosystem::PyPI, "cryptography", "39.0.1")
+                .is_empty(),
             "fixed version is clean"
         );
         assert!(
-            db.matches(&Ecosystem::PyPI, "cryptography", "1.7.2").is_empty(),
+            db.matches(&Ecosystem::PyPI, "cryptography", "1.7.2")
+                .is_empty(),
             "pre-introduction version is clean"
         );
         assert!(
-            db.matches(&Ecosystem::PyPI, "cryptography", "not-a-version").is_empty(),
+            db.matches(&Ecosystem::PyPI, "cryptography", "not-a-version")
+                .is_empty(),
             "unparseable version matches nothing"
         );
     }
@@ -1087,7 +1123,10 @@ Affected versions of this crate did not require the buffer wrapped in
         assert_eq!(adv.package, "actix-http");
         assert_eq!(adv.ecosystem, Ecosystem::Cargo);
         // Title lives in the prose, not the TOML.
-        assert_eq!(adv.title, "Use-after-free in BodyStream due to lack of pinning");
+        assert_eq!(
+            adv.title,
+            "Use-after-free in BodyStream due to lack of pinning"
+        );
         match &adv.affected {
             Affected::Requirements { patched, .. } => {
                 assert_eq!(patched, &vec![">= 2.0.0-alpha.1".to_string()]);
@@ -1106,11 +1145,18 @@ Affected versions of this crate did not require the buffer wrapped in
         db.insert(parse_rustsec_advisory(&path).unwrap());
 
         let vulnerable = locked_finding("actix-http", "1.0.0");
-        assert_eq!(db.matches(&Ecosystem::Cargo, "actix-http", "1.0.0").len(), 1);
-        assert!(!correlate(&db, std::slice::from_ref(&vulnerable)).matches.is_empty());
+        assert_eq!(
+            db.matches(&Ecosystem::Cargo, "actix-http", "1.0.0").len(),
+            1
+        );
+        assert!(!correlate(&db, std::slice::from_ref(&vulnerable))
+            .matches
+            .is_empty());
 
         // Patched version must not match.
-        assert!(db.matches(&Ecosystem::Cargo, "actix-http", "2.0.0").is_empty());
+        assert!(db
+            .matches(&Ecosystem::Cargo, "actix-http", "2.0.0")
+            .is_empty());
     }
 
     #[test]

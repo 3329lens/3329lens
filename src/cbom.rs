@@ -360,7 +360,11 @@ pub fn findings_to_cbom(findings: &[CryptoFinding], target: &str) -> Bom {
 
         // Record this detection location, de-duplicating repeats.
         if let Some(evidence) = bom.components[lib_idx].evidence.as_mut() {
-            if !evidence.occurrences.iter().any(|o| o.location == finding.path) {
+            if !evidence
+                .occurrences
+                .iter()
+                .any(|o| o.location == finding.path)
+            {
                 evidence.occurrences.push(Occurrence {
                     location: finding.path.clone(),
                 });
@@ -528,44 +532,140 @@ fn algo(
 // Reusable specs for algorithms shared across many libraries. The Shor-breakable
 // asymmetric algorithms carry nistQuantumSecurityLevel = 0.
 fn rsa() -> AlgorithmSpec {
-    algo("RSA-2048", Primitive::Pke, Some("2048"), None, Some(112), Some(0), Some("1.2.840.113549.1.1.1"))
+    algo(
+        "RSA-2048",
+        Primitive::Pke,
+        Some("2048"),
+        None,
+        Some(112),
+        Some(0),
+        Some("1.2.840.113549.1.1.1"),
+    )
 }
 fn ecdsa() -> AlgorithmSpec {
-    algo("ECDSA-P256", Primitive::Signature, Some("P-256"), Some("P-256"), Some(128), Some(0), Some("1.2.840.10045.2.1"))
+    algo(
+        "ECDSA-P256",
+        Primitive::Signature,
+        Some("P-256"),
+        Some("P-256"),
+        Some(128),
+        Some(0),
+        Some("1.2.840.10045.2.1"),
+    )
 }
 /// Classical finite-field Diffie-Hellman. Shor-breakable, hence quantum level 0.
 fn dh() -> AlgorithmSpec {
-    algo("DH-2048", Primitive::KeyAgree, Some("2048"), None, Some(112), Some(0), None)
+    algo(
+        "DH-2048",
+        Primitive::KeyAgree,
+        Some("2048"),
+        None,
+        Some(112),
+        Some(0),
+        None,
+    )
 }
 fn ecdh() -> AlgorithmSpec {
-    algo("ECDH-P256", Primitive::KeyAgree, Some("P-256"), Some("P-256"), Some(128), Some(0), None)
+    algo(
+        "ECDH-P256",
+        Primitive::KeyAgree,
+        Some("P-256"),
+        Some("P-256"),
+        Some(128),
+        Some(0),
+        None,
+    )
 }
 fn ed25519() -> AlgorithmSpec {
-    algo("Ed25519", Primitive::Signature, None, Some("Curve25519"), Some(128), Some(0), Some("1.3.101.112"))
+    algo(
+        "Ed25519",
+        Primitive::Signature,
+        None,
+        Some("Curve25519"),
+        Some(128),
+        Some(0),
+        Some("1.3.101.112"),
+    )
 }
 fn x25519() -> AlgorithmSpec {
-    algo("X25519", Primitive::KeyAgree, None, Some("Curve25519"), Some(128), Some(0), Some("1.3.101.110"))
+    algo(
+        "X25519",
+        Primitive::KeyAgree,
+        None,
+        Some("Curve25519"),
+        Some(128),
+        Some(0),
+        Some("1.3.101.110"),
+    )
 }
 fn aes256() -> AlgorithmSpec {
-    algo("AES-256", Primitive::BlockCipher, Some("256"), None, Some(256), Some(5), Some("2.16.840.1.101.3.4.1"))
+    algo(
+        "AES-256",
+        Primitive::BlockCipher,
+        Some("256"),
+        None,
+        Some(256),
+        Some(5),
+        Some("2.16.840.1.101.3.4.1"),
+    )
 }
 fn chacha20() -> AlgorithmSpec {
-    algo("ChaCha20", Primitive::StreamCipher, Some("256"), None, Some(256), Some(5), None)
+    algo(
+        "ChaCha20",
+        Primitive::StreamCipher,
+        Some("256"),
+        None,
+        Some(256),
+        Some(5),
+        None,
+    )
 }
 fn poly1305() -> AlgorithmSpec {
-    algo("Poly1305", Primitive::Mac, None, None, Some(128), Some(5), None)
+    algo(
+        "Poly1305",
+        Primitive::Mac,
+        None,
+        None,
+        Some(128),
+        Some(5),
+        None,
+    )
 }
 fn sha256() -> AlgorithmSpec {
-    algo("SHA-256", Primitive::Hash, Some("256"), None, Some(128), Some(2), Some("2.16.840.1.101.3.4.2.1"))
+    algo(
+        "SHA-256",
+        Primitive::Hash,
+        Some("256"),
+        None,
+        Some(128),
+        Some(2),
+        Some("2.16.840.1.101.3.4.2.1"),
+    )
 }
 fn hmac() -> AlgorithmSpec {
     algo("HMAC", Primitive::Mac, None, None, None, None, None)
 }
 fn mlkem768() -> AlgorithmSpec {
-    algo("ML-KEM-768", Primitive::Kem, Some("ML-KEM-768"), None, None, Some(3), None)
+    algo(
+        "ML-KEM-768",
+        Primitive::Kem,
+        Some("ML-KEM-768"),
+        None,
+        None,
+        Some(3),
+        None,
+    )
 }
 fn mldsa65() -> AlgorithmSpec {
-    algo("ML-DSA-65", Primitive::Signature, Some("ML-DSA-65"), None, None, Some(3), None)
+    algo(
+        "ML-DSA-65",
+        Primitive::Signature,
+        Some("ML-DSA-65"),
+        None,
+        None,
+        Some(3),
+        None,
+    )
 }
 
 /// Infer the cryptographic algorithms a library is capable of, from its name.
@@ -613,7 +713,15 @@ fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
         "create-hmac" => return vec![hmac()],
         "keccak" => return vec![sha256_variant("SHA3-256")],
         "blakejs" => {
-            return vec![algo("BLAKE2", Primitive::Hash, None, None, Some(128), Some(2), None)];
+            return vec![algo(
+                "BLAKE2",
+                Primitive::Hash,
+                None,
+                None,
+                Some(128),
+                Some(2),
+                None,
+            )];
         }
         // MD5 is broken, but *classically* — collision resistance, not Shor.
         // classicalSecurityLevel 0 records that; nistQuantumSecurityLevel is
@@ -650,10 +758,26 @@ fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
         return vec![mldsa65()];
     }
     if n.contains("falcon") {
-        return vec![algo("Falcon-512", Primitive::Signature, Some("Falcon-512"), None, None, Some(1), None)];
+        return vec![algo(
+            "Falcon-512",
+            Primitive::Signature,
+            Some("Falcon-512"),
+            None,
+            None,
+            Some(1),
+            None,
+        )];
     }
     if n.contains("sphincs") {
-        return vec![algo("SLH-DSA (SPHINCS+)", Primitive::Signature, Some("SPHINCS+-128s"), None, None, Some(1), None)];
+        return vec![algo(
+            "SLH-DSA (SPHINCS+)",
+            Primitive::Signature,
+            Some("SPHINCS+-128s"),
+            None,
+            None,
+            Some(1),
+            None,
+        )];
     }
 
     // SSL/TLS umbrella libraries.
@@ -706,7 +830,15 @@ fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
         return vec![rsa()];
     }
     if n.contains("dsa") {
-        return vec![algo("DSA", Primitive::Signature, None, None, Some(112), Some(0), Some("1.2.840.10040.4.1"))];
+        return vec![algo(
+            "DSA",
+            Primitive::Signature,
+            None,
+            None,
+            Some(112),
+            Some(0),
+            Some("1.2.840.10040.4.1"),
+        )];
     }
     if n.contains("chacha20") {
         return vec![chacha20()];
@@ -721,10 +853,26 @@ fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
         return vec![sha256()];
     }
     if n.contains("blake2") {
-        return vec![algo("BLAKE2", Primitive::Hash, None, None, Some(128), Some(2), None)];
+        return vec![algo(
+            "BLAKE2",
+            Primitive::Hash,
+            None,
+            None,
+            Some(128),
+            Some(2),
+            None,
+        )];
     }
     if n.contains("blake3") {
-        return vec![algo("BLAKE3", Primitive::Hash, None, None, Some(128), Some(2), None)];
+        return vec![algo(
+            "BLAKE3",
+            Primitive::Hash,
+            None,
+            None,
+            Some(128),
+            Some(2),
+            None,
+        )];
     }
     if n.contains("argon2") {
         return vec![algo("Argon2", Primitive::Kdf, None, None, None, None, None)];
@@ -742,7 +890,15 @@ fn algorithms_for_library(name: &str) -> Vec<AlgorithmSpec> {
 
 /// A SHA-2-family hash with a different display name (e.g. SHA3-256).
 fn sha256_variant(name: &'static str) -> AlgorithmSpec {
-    algo(name, Primitive::Hash, Some("256"), None, Some(128), Some(2), None)
+    algo(
+        name,
+        Primitive::Hash,
+        Some("256"),
+        None,
+        Some(128),
+        Some(2),
+        None,
+    )
 }
 
 /// Lowercase a name and replace any non-alphanumeric run with single hyphens,
@@ -798,8 +954,20 @@ mod tests {
     #[test]
     fn every_dependency_ref_resolves_to_a_component() {
         let findings = vec![
-            finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, Some("0.17"), "/p/Cargo.toml"),
-            finding("openssl", Ecosystem::Cargo, CryptoType::SslTls, Some("0.10"), "/p/Cargo.toml"),
+            finding(
+                "ring",
+                Ecosystem::Cargo,
+                CryptoType::GeneralCrypto,
+                Some("0.17"),
+                "/p/Cargo.toml",
+            ),
+            finding(
+                "openssl",
+                Ecosystem::Cargo,
+                CryptoType::SslTls,
+                Some("0.10"),
+                "/p/Cargo.toml",
+            ),
         ];
         let bom = findings_to_cbom(&findings, "target");
         let refs: HashSet<&str> = bom
@@ -808,9 +976,17 @@ mod tests {
             .filter_map(|c| c.bom_ref.as_deref())
             .collect();
         for dep in &bom.dependencies {
-            assert!(refs.contains(dep.bom_ref.as_str()), "dangling ref {}", dep.bom_ref);
+            assert!(
+                refs.contains(dep.bom_ref.as_str()),
+                "dangling ref {}",
+                dep.bom_ref
+            );
             for target in &dep.depends_on {
-                assert!(refs.contains(target.as_str()), "dangling dependsOn {}", target);
+                assert!(
+                    refs.contains(target.as_str()),
+                    "dangling dependsOn {}",
+                    target
+                );
             }
         }
     }
@@ -819,11 +995,21 @@ mod tests {
     fn shared_algorithms_are_deduplicated() {
         // ring and openssl both imply SHA-256 / AES-256.
         let findings = vec![
-            finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, None, "/a"),
+            finding(
+                "ring",
+                Ecosystem::Cargo,
+                CryptoType::GeneralCrypto,
+                None,
+                "/a",
+            ),
             finding("openssl", Ecosystem::Cargo, CryptoType::SslTls, None, "/b"),
         ];
         let bom = findings_to_cbom(&findings, "t");
-        let sha = bom.components.iter().filter(|c| c.name == "SHA-256").count();
+        let sha = bom
+            .components
+            .iter()
+            .filter(|c| c.name == "SHA-256")
+            .count();
         assert_eq!(sha, 1, "SHA-256 should be a single shared component");
     }
 
@@ -863,32 +1049,74 @@ mod tests {
                     Some(AssetType::Protocol)
                 )
         });
-        assert!(has_tls, "SSL/TLS library should expose a TLS protocol asset");
+        assert!(
+            has_tls,
+            "SSL/TLS library should expose a TLS protocol asset"
+        );
     }
 
     #[test]
     fn purls_only_for_packaged_ecosystems() {
         let findings = vec![
-            finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, Some("0.17"), "/a"),
-            finding("libssl.so", Ecosystem::System, CryptoType::SslTls, None, "/lib/libssl.so"),
+            finding(
+                "ring",
+                Ecosystem::Cargo,
+                CryptoType::GeneralCrypto,
+                Some("0.17"),
+                "/a",
+            ),
+            finding(
+                "libssl.so",
+                Ecosystem::System,
+                CryptoType::SslTls,
+                None,
+                "/lib/libssl.so",
+            ),
         ];
         let bom = findings_to_cbom(&findings, "t");
         let ring = bom.components.iter().find(|c| c.name == "ring").unwrap();
         assert_eq!(ring.purl.as_deref(), Some("pkg:cargo/ring@0.17"));
-        let sys = bom.components.iter().find(|c| c.name == "libssl.so").unwrap();
+        let sys = bom
+            .components
+            .iter()
+            .find(|c| c.name == "libssl.so")
+            .unwrap();
         assert_eq!(sys.purl, None);
     }
 
     #[test]
     fn scoped_npm_name_encodes_at_sign_in_purl() {
         let findings = vec![
-            finding("@scope/cryptolib", Ecosystem::Npm, CryptoType::GeneralCrypto, Some("2.4.0"), "/p/package.json"),
-            finding("node-forge", Ecosystem::Npm, CryptoType::GeneralCrypto, Some("1.3.1"), "/p/package.json"),
+            finding(
+                "@scope/cryptolib",
+                Ecosystem::Npm,
+                CryptoType::GeneralCrypto,
+                Some("2.4.0"),
+                "/p/package.json",
+            ),
+            finding(
+                "node-forge",
+                Ecosystem::Npm,
+                CryptoType::GeneralCrypto,
+                Some("1.3.1"),
+                "/p/package.json",
+            ),
         ];
         let bom = findings_to_cbom(&findings, "t");
-        let scoped = bom.components.iter().find(|c| c.name == "@scope/cryptolib").unwrap();
-        assert_eq!(scoped.purl.as_deref(), Some("pkg:npm/%40scope/cryptolib@2.4.0"));
-        let plain = bom.components.iter().find(|c| c.name == "node-forge").unwrap();
+        let scoped = bom
+            .components
+            .iter()
+            .find(|c| c.name == "@scope/cryptolib")
+            .unwrap();
+        assert_eq!(
+            scoped.purl.as_deref(),
+            Some("pkg:npm/%40scope/cryptolib@2.4.0")
+        );
+        let plain = bom
+            .components
+            .iter()
+            .find(|c| c.name == "node-forge")
+            .unwrap();
         assert_eq!(plain.purl.as_deref(), Some("pkg:npm/node-forge@1.3.1"));
     }
 
@@ -905,7 +1133,10 @@ mod tests {
         let mut bom = findings_to_cbom(&findings, "t");
         assert!(bom.vulnerabilities.is_empty());
         let json = serde_json::to_value(&bom).unwrap();
-        assert!(json.get("vulnerabilities").is_none(), "key omitted when empty");
+        assert!(
+            json.get("vulnerabilities").is_none(),
+            "key omitted when empty"
+        );
 
         // Populated: links to the affected library's bom-ref and serializes.
         let lib_ref = bom
@@ -919,7 +1150,9 @@ mod tests {
                 method: Some("CVSSv3".to_string()),
             }],
             description: Some("test".to_string()),
-            affects: vec![Affects { bom_ref: lib_ref.clone() }],
+            affects: vec![Affects {
+                bom_ref: lib_ref.clone(),
+            }],
         });
         let json = serde_json::to_value(&bom).unwrap();
         let vulns = json["vulnerabilities"].as_array().expect("array present");
@@ -939,7 +1172,10 @@ mod tests {
         assert_eq!(b[18], b'-');
         assert_eq!(b[23], b'-');
         assert_eq!(b[14], b'4', "version nibble must be 4");
-        assert!(matches!(b[19], b'8' | b'9' | b'a' | b'b'), "variant bits must be 10xx");
+        assert!(
+            matches!(b[19], b'8' | b'9' | b'a' | b'b'),
+            "variant bits must be 10xx"
+        );
     }
 
     #[test]
@@ -1011,7 +1247,9 @@ mod tests {
         ] {
             let algos = algorithms_for_library(name);
             assert!(
-                algos.iter().any(|a| a.nist_quantum_security_level == Some(0)),
+                algos
+                    .iter()
+                    .any(|a| a.nist_quantum_security_level == Some(0)),
                 "{name} should carry a Shor-breakable algorithm, got {algos:?}"
             );
         }

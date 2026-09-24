@@ -8,10 +8,10 @@
  * - UI state (view mode, selection, filters)
  */
 
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use serde::Serialize;
 
 // Scan-result data types now live in the scanner crate; re-exported here so
 // existing dashboard code and consumers keep their import paths.
@@ -135,10 +135,10 @@ pub struct MigrationRecommendation {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum MigrationStrategy {
-    DirectReplacement,      // Simple swap (e.g., SHA-256 is fine)
-    HybridMode,             // Classical + PQ (e.g., RSA + Kyber)
-    PurePostQuantum,        // Full PQ replacement
-    NoMigrationNeeded,      // Already PQ-ready
+    DirectReplacement, // Simple swap (e.g., SHA-256 is fine)
+    HybridMode,        // Classical + PQ (e.g., RSA + Kyber)
+    PurePostQuantum,   // Full PQ replacement
+    NoMigrationNeeded, // Already PQ-ready
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -151,11 +151,11 @@ pub enum EffortLevel {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum MigrationPriority {
-    Critical,   // Immediate action required
-    High,       // 0-6 months
-    Medium,     // 6-18 months
-    Low,        // 18-36 months
-    None,       // No migration needed
+    Critical, // Immediate action required
+    High,     // 0-6 months
+    Medium,   // 6-18 months
+    Low,      // 18-36 months
+    None,     // No migration needed
 }
 
 pub struct ScannerDashboardState {
@@ -274,7 +274,11 @@ impl LibraryFilter {
 
         // Check name pattern
         if let Some(ref pattern) = self.name_pattern {
-            if !library.name.to_lowercase().contains(&pattern.to_lowercase()) {
+            if !library
+                .name
+                .to_lowercase()
+                .contains(&pattern.to_lowercase())
+            {
                 return false;
             }
         }
@@ -304,7 +308,10 @@ pub enum SortBy {
 pub enum ScannerMessage {
     LibraryDiscovered(LibraryInfo),
     ProgressUpdate(ScanProgress),
-    ScanComplete { total_libraries: usize, duration: Duration },
+    ScanComplete {
+        total_libraries: usize,
+        duration: Duration,
+    },
     ScanError(String),
 }
 
@@ -354,11 +361,14 @@ impl ScannerDashboardState {
             ScannerMessage::ProgressUpdate(progress) => {
                 self.scan_progress = progress;
             }
-            ScannerMessage::ScanComplete { total_libraries, duration: _ } => {
+            ScannerMessage::ScanComplete {
+                total_libraries,
+                duration: _,
+            } => {
                 self.scan_status = ScanStatus::Completed;
                 self.completion_time = Some(self.start_time.elapsed()); // Freeze runtime
                 self.completion_notification_shown = true; // Show completion notification
-                // Verify count matches
+                                                           // Verify count matches
                 debug_assert_eq!(self.library_store.len(), total_libraries);
             }
             ScannerMessage::ScanError(error) => {
@@ -370,8 +380,14 @@ impl ScannerDashboardState {
     /// Add a newly discovered library (streaming update)
     pub fn add_library(&mut self, library: LibraryInfo) {
         // Update counts
-        *self.category_counts.entry(library.category.clone()).or_insert(0) += 1;
-        *self.risk_counts.entry(library.risk_level.clone()).or_insert(0) += 1;
+        *self
+            .category_counts
+            .entry(library.category.clone())
+            .or_insert(0) += 1;
+        *self
+            .risk_counts
+            .entry(library.risk_level.clone())
+            .or_insert(0) += 1;
 
         // Update statistics
         self.total_size += library.size;
@@ -408,7 +424,8 @@ impl ScannerDashboardState {
 
     pub fn get_runtime(&self) -> Duration {
         // If scan is completed, return frozen time; otherwise return elapsed time
-        self.completion_time.unwrap_or_else(|| self.start_time.elapsed())
+        self.completion_time
+            .unwrap_or_else(|| self.start_time.elapsed())
     }
 
     // Library store accessor methods
@@ -425,13 +442,17 @@ impl ScannerDashboardState {
     }
 
     pub fn get_quantum_vulnerable_count(&self) -> usize {
-        self.library_store.iter()
+        self.library_store
+            .iter()
             .filter(|lib| lib.quantum_vulnerable)
             .count()
     }
 
     pub fn get_pq_ready_count(&self) -> usize {
-        self.category_counts.get(&LibraryCategory::PostQuantum).copied().unwrap_or(0)
+        self.category_counts
+            .get(&LibraryCategory::PostQuantum)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn scroll_up(&mut self) {
@@ -504,7 +525,8 @@ impl ScannerDashboardState {
             LibraryCategory::Other,
         ] {
             // Use indexed lookup - O(1) instead of O(n)
-            let mut libs: Vec<&LibraryInfo> = self.library_store
+            let mut libs: Vec<&LibraryInfo> = self
+                .library_store
                 .get_by_category(category)
                 .into_iter()
                 .filter(|lib| self.filter.matches(lib))
@@ -535,14 +557,15 @@ impl ScannerDashboardState {
             SortBy::Name => libs.sort_by(|a, b| a.name.cmp(&b.name)),
             SortBy::Category => libs.sort_by(|a, b| a.category.name().cmp(b.category.name())),
             SortBy::Risk => libs.sort_by(|a, b| b.risk_level.cmp(&a.risk_level)), // High to low
-            SortBy::Size => libs.sort_by(|a, b| b.size.cmp(&a.size)), // Large to small
-            SortBy::Date => libs.sort_by(|a, b| b.modified.cmp(&a.modified)), // Newest first
+            SortBy::Size => libs.sort_by(|a, b| b.size.cmp(&a.size)),             // Large to small
+            SortBy::Date => libs.sort_by(|a, b| b.modified.cmp(&a.modified)),     // Newest first
         }
     }
 
     // Get filtered and sorted libraries
     pub fn get_filtered_libraries(&self) -> Vec<&LibraryInfo> {
-        let mut libs: Vec<&LibraryInfo> = self.library_store
+        let mut libs: Vec<&LibraryInfo> = self
+            .library_store
             .iter()
             .filter(|lib| self.filter.matches(lib))
             .collect();
@@ -561,7 +584,10 @@ impl ScannerDashboardState {
     }
 
     pub fn get_filtered_count(&self) -> usize {
-        self.library_store.iter().filter(|lib| self.filter.matches(lib)).count()
+        self.library_store
+            .iter()
+            .filter(|lib| self.filter.matches(lib))
+            .count()
     }
 
     // Detail view methods
@@ -581,7 +607,11 @@ impl ScannerDashboardState {
             return None;
         }
 
-        let reversed_index = self.recent_libraries.len().saturating_sub(1).saturating_sub(self.selected_index);
+        let reversed_index = self
+            .recent_libraries
+            .len()
+            .saturating_sub(1)
+            .saturating_sub(self.selected_index);
         self.recent_libraries.get(reversed_index)
     }
 
@@ -606,11 +636,13 @@ impl ScannerDashboardState {
         for lib in self.library_store.iter() {
             if lib.quantum_vulnerable {
                 let recommendation = self.create_recommendation_for_library(lib);
-                self.migration_recommendations.insert(lib.name.clone(), recommendation);
+                self.migration_recommendations
+                    .insert(lib.name.clone(), recommendation);
 
                 // Initialize migration status
                 if !self.migration_statuses.contains_key(&lib.name) {
-                    self.migration_statuses.insert(lib.name.clone(), MigrationStatus::NotStarted);
+                    self.migration_statuses
+                        .insert(lib.name.clone(), MigrationStatus::NotStarted);
                 }
             }
         }
@@ -756,7 +788,8 @@ impl ScannerDashboardState {
         }
 
         // Remove empty priority levels and sort within each priority
-        result.into_iter()
+        result
+            .into_iter()
             .filter(|(_, libs)| !libs.is_empty())
             .map(|(priority, mut libs)| {
                 libs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -767,23 +800,21 @@ impl ScannerDashboardState {
 
     /// Mark a library as migrated
     pub fn mark_library_migrated(&mut self, library_name: &str) {
-        self.migration_statuses.insert(
-            library_name.to_string(),
-            MigrationStatus::Completed,
-        );
+        self.migration_statuses
+            .insert(library_name.to_string(), MigrationStatus::Completed);
     }
 
     /// Mark a library migration as in progress
     pub fn mark_library_in_progress(&mut self, library_name: &str) {
-        self.migration_statuses.insert(
-            library_name.to_string(),
-            MigrationStatus::InProgress,
-        );
+        self.migration_statuses
+            .insert(library_name.to_string(), MigrationStatus::InProgress);
     }
 
     /// Toggle migration status between NotStarted -> InProgress -> Completed -> NotStarted
     pub fn toggle_migration_status(&mut self, library_name: &str) {
-        let current = self.migration_statuses.get(library_name)
+        let current = self
+            .migration_statuses
+            .get(library_name)
             .cloned()
             .unwrap_or(MigrationStatus::NotStarted);
 
@@ -793,7 +824,8 @@ impl ScannerDashboardState {
             MigrationStatus::Completed => MigrationStatus::NotStarted,
         };
 
-        self.migration_statuses.insert(library_name.to_string(), new_status);
+        self.migration_statuses
+            .insert(library_name.to_string(), new_status);
     }
 
     /// Get migration statistics
@@ -815,7 +847,8 @@ impl ScannerDashboardState {
 
     /// Get estimated total migration timeline (months)
     pub fn get_estimated_timeline(&self) -> u32 {
-        self.migration_recommendations.values()
+        self.migration_recommendations
+            .values()
             .filter(|rec| rec.priority != MigrationPriority::None)
             .map(|rec| rec.timeline_months)
             .max()
@@ -835,7 +868,12 @@ impl ScannerDashboardState {
         // Header
         writeln!(output, "# Post-Quantum Cryptography Migration Plan").unwrap();
         writeln!(output).unwrap();
-        writeln!(output, "**Generated:** {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")).unwrap();
+        writeln!(
+            output,
+            "**Generated:** {}",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        )
+        .unwrap();
         writeln!(output, "**Scan Path:** {}", self.scan_path.display()).unwrap();
         writeln!(output).unwrap();
 
@@ -843,12 +881,17 @@ impl ScannerDashboardState {
         writeln!(output, "## Executive Summary").unwrap();
         writeln!(output).unwrap();
         writeln!(output, "- **Total Libraries Scanned:** {}", total_libs).unwrap();
-        writeln!(output, "- **Quantum-Vulnerable Libraries:** {} ({:.1}%)",
+        writeln!(
+            output,
+            "- **Quantum-Vulnerable Libraries:** {} ({:.1}%)",
             total_vulnerable,
             if total_libs > 0 {
                 (total_vulnerable as f64 / total_libs as f64) * 100.0
-            } else { 0.0 }
-        ).unwrap();
+            } else {
+                0.0
+            }
+        )
+        .unwrap();
         writeln!(output, "- **Migration Timeline:** {} months", timeline).unwrap();
         writeln!(output, "- **Migration Progress:**").unwrap();
         writeln!(output, "  - Not Started: {}", not_started).unwrap();
@@ -863,13 +906,28 @@ impl ScannerDashboardState {
         writeln!(output, "|------------|-------|------------|").unwrap();
 
         let total_libs = self.library_store.len();
-        for risk in &[RiskLevel::Critical, RiskLevel::High, RiskLevel::Medium, RiskLevel::Low, RiskLevel::None] {
+        for risk in &[
+            RiskLevel::Critical,
+            RiskLevel::High,
+            RiskLevel::Medium,
+            RiskLevel::Low,
+            RiskLevel::None,
+        ] {
             let count = self.risk_counts.get(risk).copied().unwrap_or(0);
             let pct = if total_libs > 0 {
                 (count as f64 / total_libs as f64) * 100.0
-            } else { 0.0 };
-            writeln!(output, "| {} {} | {} | {:.1}% |",
-                risk.icon(), risk.label(), count, pct).unwrap();
+            } else {
+                0.0
+            };
+            writeln!(
+                output,
+                "| {} {} | {} | {:.1}% |",
+                risk.icon(),
+                risk.label(),
+                count,
+                pct
+            )
+            .unwrap();
         }
         writeln!(output).unwrap();
 
@@ -881,21 +939,42 @@ impl ScannerDashboardState {
                 continue; // Skip PQ-ready libraries
             }
 
-            writeln!(output, "## {} {} Priority ({} libraries)",
-                priority.icon(), priority.label(), libs.len()).unwrap();
+            writeln!(
+                output,
+                "## {} {} Priority ({} libraries)",
+                priority.icon(),
+                priority.label(),
+                libs.len()
+            )
+            .unwrap();
             writeln!(output).unwrap();
 
             for lib in libs {
                 if let Some(rec) = self.migration_recommendations.get(&lib.name) {
-                    let status = self.migration_statuses.get(&lib.name)
+                    let status = self
+                        .migration_statuses
+                        .get(&lib.name)
                         .unwrap_or(&MigrationStatus::NotStarted);
 
-                    writeln!(output, "### {} {} {}", status.icon(), lib.name, status.label()).unwrap();
+                    writeln!(
+                        output,
+                        "### {} {} {}",
+                        status.icon(),
+                        lib.name,
+                        status.label()
+                    )
+                    .unwrap();
                     writeln!(output).unwrap();
                     writeln!(output, "**Library Details:**").unwrap();
                     writeln!(output, "- **Path:** `{}`", lib.path.display()).unwrap();
                     writeln!(output, "- **Category:** {}", lib.category.name()).unwrap();
-                    writeln!(output, "- **Risk Level:** {} {}", lib.risk_level.icon(), lib.risk_level.label()).unwrap();
+                    writeln!(
+                        output,
+                        "- **Risk Level:** {} {}",
+                        lib.risk_level.icon(),
+                        lib.risk_level.label()
+                    )
+                    .unwrap();
                     if let Some(ref version) = lib.version {
                         writeln!(output, "- **Version:** {}", version).unwrap();
                     }
@@ -906,7 +985,12 @@ impl ScannerDashboardState {
 
                     writeln!(output, "**Migration Recommendation:**").unwrap();
                     writeln!(output, "- **Current Algorithm:** {}", rec.current_algorithm).unwrap();
-                    writeln!(output, "- **Recommended Migration:** {}", rec.recommended_algorithm).unwrap();
+                    writeln!(
+                        output,
+                        "- **Recommended Migration:** {}",
+                        rec.recommended_algorithm
+                    )
+                    .unwrap();
                     writeln!(output, "- **Strategy:** {:?}", rec.migration_strategy).unwrap();
                     writeln!(output, "- **Timeline:** {} months", rec.timeline_months).unwrap();
                     writeln!(output, "- **Effort Level:** {}", rec.effort_level.label()).unwrap();
@@ -922,13 +1006,20 @@ impl ScannerDashboardState {
         }
 
         // Post-Quantum Ready Libraries
-        let pq_ready: Vec<_> = self.library_store.iter()
+        let pq_ready: Vec<_> = self
+            .library_store
+            .iter()
             .filter(|lib| lib.category == LibraryCategory::PostQuantum)
             .collect();
 
         if !pq_ready.is_empty() {
-            writeln!(output, "## {} Post-Quantum Ready Libraries ({} libraries)",
-                "✅", pq_ready.len()).unwrap();
+            writeln!(
+                output,
+                "## {} Post-Quantum Ready Libraries ({} libraries)",
+                "✅",
+                pq_ready.len()
+            )
+            .unwrap();
             writeln!(output).unwrap();
             writeln!(output, "These libraries are already quantum-resistant:").unwrap();
             writeln!(output).unwrap();
@@ -944,29 +1035,61 @@ impl ScannerDashboardState {
         writeln!(output).unwrap();
         writeln!(output, "1. **Immediate Actions (0-3 months):**").unwrap();
         writeln!(output, "   - Address all CRITICAL priority libraries").unwrap();
-        writeln!(output, "   - Replace legacy cryptographic algorithms (MD5, DES)").unwrap();
-        writeln!(output, "   - Assess dependencies and impact for high-priority migrations").unwrap();
+        writeln!(
+            output,
+            "   - Replace legacy cryptographic algorithms (MD5, DES)"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "   - Assess dependencies and impact for high-priority migrations"
+        )
+        .unwrap();
         writeln!(output).unwrap();
         writeln!(output, "2. **Short-term Actions (3-12 months):**").unwrap();
-        writeln!(output, "   - Migrate HIGH priority libraries to hybrid classical+PQ modes").unwrap();
-        writeln!(output, "   - Begin testing post-quantum algorithms in non-production environments").unwrap();
-        writeln!(output, "   - Update libraries to versions with PQ support (e.g., OpenSSL 3.2+)").unwrap();
+        writeln!(
+            output,
+            "   - Migrate HIGH priority libraries to hybrid classical+PQ modes"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "   - Begin testing post-quantum algorithms in non-production environments"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "   - Update libraries to versions with PQ support (e.g., OpenSSL 3.2+)"
+        )
+        .unwrap();
         writeln!(output).unwrap();
         writeln!(output, "3. **Medium-term Actions (12-24 months):**").unwrap();
         writeln!(output, "   - Complete MEDIUM priority migrations").unwrap();
-        writeln!(output, "   - Deploy hybrid cryptography in production systems").unwrap();
+        writeln!(
+            output,
+            "   - Deploy hybrid cryptography in production systems"
+        )
+        .unwrap();
         writeln!(output, "   - Monitor NIST post-quantum standards updates").unwrap();
         writeln!(output).unwrap();
         writeln!(output, "4. **Long-term Actions (24-36 months):**").unwrap();
         writeln!(output, "   - Complete all LOW priority migrations").unwrap();
-        writeln!(output, "   - Transition from hybrid to pure post-quantum where appropriate").unwrap();
+        writeln!(
+            output,
+            "   - Transition from hybrid to pure post-quantum where appropriate"
+        )
+        .unwrap();
         writeln!(output, "   - Conduct regular cryptographic audits").unwrap();
         writeln!(output).unwrap();
 
         // Footer
         writeln!(output, "---").unwrap();
         writeln!(output).unwrap();
-        writeln!(output, "*Generated by Slow Lynx Cryptography Discovery - Scanner Dashboard*").unwrap();
+        writeln!(
+            output,
+            "*Generated by Slow Lynx Cryptography Discovery - Scanner Dashboard*"
+        )
+        .unwrap();
 
         output
     }
@@ -1023,17 +1146,20 @@ impl ScannerDashboardState {
         // Data rows
         for lib in self.library_store.iter() {
             // Format modified date
-            let modified_date = if let Ok(_duration) = lib.modified.duration_since(std::time::UNIX_EPOCH) {
-                let datetime = DateTime::<Utc>::from(lib.modified);
-                datetime.format("%Y-%m-%d %H:%M:%S").to_string()
-            } else {
-                "Unknown".to_string()
-            };
+            let modified_date =
+                if let Ok(_duration) = lib.modified.duration_since(std::time::UNIX_EPOCH) {
+                    let datetime = DateTime::<Utc>::from(lib.modified);
+                    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+                } else {
+                    "Unknown".to_string()
+                };
 
             // Get migration data if available
             let (migration_priority, migration_status, current_algo, recommended_algo, timeline) =
                 if let Some(rec) = self.migration_recommendations.get(&lib.name) {
-                    let status = self.migration_statuses.get(&lib.name)
+                    let status = self
+                        .migration_statuses
+                        .get(&lib.name)
                         .map(|s| s.label())
                         .unwrap_or("Not Started");
 

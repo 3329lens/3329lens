@@ -4,9 +4,9 @@
  * Manages keyboard input and user interactions for the scanner dashboard
  */
 
+use crate::scanner_dashboard::state::{ScannerDashboardState, ViewMode};
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use std::time::Duration;
-use crate::scanner_dashboard::state::{ScannerDashboardState, ViewMode};
 
 pub enum AppAction {
     Continue,
@@ -168,7 +168,9 @@ fn handle_key_event(
             if state.current_view == ViewMode::Migration {
                 // Toggle migration status for the first vulnerable library (simplified)
                 // In a full implementation, this would use selected_index to pick the library
-                let library_name = state.get_all_libraries().iter()
+                let library_name = state
+                    .get_all_libraries()
+                    .iter()
                     .find(|l| l.quantum_vulnerable)
                     .map(|lib| lib.name.clone());
 
@@ -184,8 +186,10 @@ fn handle_key_event(
             if state.current_view == ViewMode::Migration {
                 // Export migration plan to markdown file
                 let markdown = state.export_migration_plan();
-                let filename = format!("migration_plan_{}.md",
-                    chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                let filename = format!(
+                    "migration_plan_{}.md",
+                    chrono::Local::now().format("%Y%m%d_%H%M%S")
+                );
 
                 if let Err(e) = std::fs::write(&filename, markdown) {
                     eprintln!("Failed to export migration plan: {}", e);
@@ -194,8 +198,10 @@ fn handle_key_event(
                 // Export full scan results to JSON
                 match state.export_to_json() {
                     Ok(json) => {
-                        let filename = format!("scan_results_{}.json",
-                            chrono::Local::now().format("%Y%m%d_%H%M%S"));
+                        let filename = format!(
+                            "scan_results_{}.json",
+                            chrono::Local::now().format("%Y%m%d_%H%M%S")
+                        );
 
                         if let Err(e) = std::fs::write(&filename, json) {
                             eprintln!("Failed to export JSON: {}", e);
@@ -212,8 +218,10 @@ fn handle_key_event(
         // Export to CSV: 'v' key (all views)
         KeyCode::Char('v') => {
             let csv = state.export_to_csv();
-            let filename = format!("library_inventory_{}.csv",
-                chrono::Local::now().format("%Y%m%d_%H%M%S"));
+            let filename = format!(
+                "library_inventory_{}.csv",
+                chrono::Local::now().format("%Y%m%d_%H%M%S")
+            );
 
             if let Err(e) = std::fs::write(&filename, csv) {
                 eprintln!("Failed to export CSV: {}", e);

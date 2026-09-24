@@ -12,23 +12,23 @@
  * - Interactive controls (pause, filtering, view switching)
  */
 
+pub mod events;
 pub mod state;
 pub mod ui;
-pub mod events;
 pub mod widgets;
 
 use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use events::{handle_events, AppAction};
 use ratatui::{backend::CrosstermBackend, Terminal};
+use state::{ScannerDashboardState, ScannerMessage};
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
-use state::{ScannerDashboardState, ScannerMessage};
-use events::{AppAction, handle_events};
 
 pub struct ScannerDashboardConfig {
     pub path: PathBuf,
@@ -37,7 +37,9 @@ pub struct ScannerDashboardConfig {
 }
 
 /// Run the interactive scanner dashboard
-pub fn run_scanner_dashboard(config: ScannerDashboardConfig) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_scanner_dashboard(
+    config: ScannerDashboardConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -49,15 +51,15 @@ pub fn run_scanner_dashboard(config: ScannerDashboardConfig) -> Result<(), Box<d
     let mut state = ScannerDashboardState::new(config.path.clone(), config.depth);
 
     // Create channels for scanner communication
-    let (tx_scanner, rx_scanner): (Sender<ScannerMessage>, Receiver<ScannerMessage>) = mpsc::channel();
+    let (tx_scanner, rx_scanner): (Sender<ScannerMessage>, Receiver<ScannerMessage>) =
+        mpsc::channel();
     let (tx_command, rx_command) = mpsc::channel();
 
     // Spawn scanner thread
     let scan_path = config.path.clone();
     let scan_depth = config.depth;
-    let scanner_handle = thread::spawn(move || {
-        run_scanner_thread(scan_path, scan_depth, tx_scanner, rx_command)
-    });
+    let scanner_handle =
+        thread::spawn(move || run_scanner_thread(scan_path, scan_depth, tx_scanner, rx_command));
 
     // Main application loop
     let result = run_app(&mut terminal, &mut state, rx_scanner, config.refresh_rate);

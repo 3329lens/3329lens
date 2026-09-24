@@ -117,10 +117,14 @@ fn npm_name_from_packages_key(key: &str) -> Option<String> {
 
 /// Recursively collect name -> version from a v1 `dependencies` object,
 /// descending into nested `dependencies`. First occurrence wins.
-fn collect_npm_v1_deps(deps: &serde_json::Map<String, serde_json::Value>, map: &mut HashMap<String, String>) {
+fn collect_npm_v1_deps(
+    deps: &serde_json::Map<String, serde_json::Value>,
+    map: &mut HashMap<String, String>,
+) {
     for (name, entry) in deps {
         if let Some(version) = entry.get("version").and_then(|v| v.as_str()) {
-            map.entry(name.clone()).or_insert_with(|| version.to_string());
+            map.entry(name.clone())
+                .or_insert_with(|| version.to_string());
         }
         if let Some(nested) = entry.get("dependencies").and_then(|v| v.as_object()) {
             collect_npm_v1_deps(nested, map);
@@ -198,7 +202,10 @@ pub fn parse_pipfile_lock(path: &Path) -> Option<HashMap<String, String>> {
 /// `None` when no matching sibling lock is present.
 pub fn resolve_pypi_from_sibling_lock(manifest_path: &Path) -> Option<HashMap<String, String>> {
     let dir = manifest_path.parent()?;
-    let manifest = manifest_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let manifest = manifest_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
     let (lock_name, parse): (&str, fn(&Path) -> Option<HashMap<String, String>>) = match manifest {
         "pyproject.toml" => ("poetry.lock", parse_poetry_lock),
         "Pipfile" => ("Pipfile.lock", parse_pipfile_lock),
@@ -325,7 +332,10 @@ version = "1.2.3"
         let lock = write_file(&dir, "package-lock.json", SAMPLE_NPM_LOCK_V3);
         let map = parse_npm_lock(&lock).expect("npm v3 lock should parse");
         assert_eq!(map.get("node-forge").map(String::as_str), Some("1.3.1"));
-        assert_eq!(map.get("@scope/cryptolib").map(String::as_str), Some("2.4.0"));
+        assert_eq!(
+            map.get("@scope/cryptolib").map(String::as_str),
+            Some("2.4.0")
+        );
         // Transitive dep nested under another package is surfaced.
         assert_eq!(map.get("bcrypt").map(String::as_str), Some("5.1.0"));
         // Root ("") and link-only entries contribute no version.

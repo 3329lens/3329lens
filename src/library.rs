@@ -48,18 +48,18 @@ pub enum LibraryCategory {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum LibraryType {
-    SharedLibrary,  // .so, .dll, .dylib
-    StaticLibrary,  // .a
-    Manifest,       // Cargo.toml, package.json, requirements.txt
+    SharedLibrary, // .so, .dll, .dylib
+    StaticLibrary, // .a
+    Manifest,      // Cargo.toml, package.json, requirements.txt
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub enum RiskLevel {
-    None,       // PQ-ready, no quantum risk
-    Low,        // Hash functions only
-    Medium,     // ECDH/ECDSA (some quantum resistance)
-    High,       // RSA/DSA (no quantum resistance)
-    Critical,   // Legacy algorithms (MD5, DES)
+    None,     // PQ-ready, no quantum risk
+    Low,      // Hash functions only
+    Medium,   // ECDH/ECDSA (some quantum resistance)
+    High,     // RSA/DSA (no quantum resistance)
+    Critical, // Legacy algorithms (MD5, DES)
 }
 
 impl LibraryCategory {

@@ -15,13 +15,13 @@
  * Part of the Slow Lynx Cryptography Discovery project
  */
 
-use walkdir::WalkDir;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use std::time::SystemTime;
-use serde::{Serialize, Deserialize};
+use walkdir::WalkDir;
 
 /// Maximum file size for manifest files (10 MB)
 /// Prevents DoS attacks via maliciously large Cargo.toml, package.json, etc.
@@ -127,10 +127,10 @@ fn clean_version_req(raw: &str) -> Option<String> {
 /// Source ecosystem a finding originated from (drives purl construction).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum Ecosystem {
-    Cargo,   // Rust crate (Cargo.toml)
-    Npm,     // Node.js package (package.json)
-    PyPI,    // Python package (requirements.txt)
-    System,  // Binary/static library on disk (no package coordinate)
+    Cargo,  // Rust crate (Cargo.toml)
+    Npm,    // Node.js package (package.json)
+    PyPI,   // Python package (requirements.txt)
+    System, // Binary/static library on disk (no package coordinate)
 }
 
 /// Provenance of a finding's version string.
@@ -164,11 +164,11 @@ pub struct CryptoFinding {
 /// Type of finding (how it was detected)
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum FindingType {
-    BinaryLibrary,         // Shared library file (.so, .dll, .dylib)
-    StaticLibrary,         // Static library (.a)
-    DependencyManifest,    // Found directly in Cargo.toml, package.json, etc.
-    TransitiveDependency,  // Resolved from a lockfile but not declared directly
-    SourceCode,            // Found in source code
+    BinaryLibrary,        // Shared library file (.so, .dll, .dylib)
+    StaticLibrary,        // Static library (.a)
+    DependencyManifest,   // Found directly in Cargo.toml, package.json, etc.
+    TransitiveDependency, // Resolved from a lockfile but not declared directly
+    SourceCode,           // Found in source code
 }
 
 /// Crypto crates of interest in Cargo manifests/lockfiles, with their category.
@@ -441,13 +441,19 @@ fn pyproject_declared_names(parsed: &toml::Value) -> std::collections::HashSet<S
     let mut names = std::collections::HashSet::new();
 
     let poetry = parsed.get("tool").and_then(|t| t.get("poetry"));
-    if let Some(t) = poetry.and_then(|p| p.get("dependencies")).and_then(|d| d.as_table()) {
+    if let Some(t) = poetry
+        .and_then(|p| p.get("dependencies"))
+        .and_then(|d| d.as_table())
+    {
         for k in t.keys() {
             names.insert(normalize_pypi_name(k));
         }
     }
     // Poetry group deps: [tool.poetry.group.<g>.dependencies]
-    if let Some(groups) = poetry.and_then(|p| p.get("group")).and_then(|g| g.as_table()) {
+    if let Some(groups) = poetry
+        .and_then(|p| p.get("group"))
+        .and_then(|g| g.as_table())
+    {
         for group in groups.values() {
             if let Some(deps) = group.get("dependencies").and_then(|d| d.as_table()) {
                 for k in deps.keys() {
@@ -462,7 +468,10 @@ fn pyproject_declared_names(parsed: &toml::Value) -> std::collections::HashSet<S
         if let Some(d) = project.get("dependencies") {
             arrays.push(d);
         }
-        if let Some(opt) = project.get("optional-dependencies").and_then(|o| o.as_table()) {
+        if let Some(opt) = project
+            .get("optional-dependencies")
+            .and_then(|o| o.as_table())
+        {
             arrays.extend(opt.values());
         }
         for arr in arrays {
@@ -507,11 +516,11 @@ fn resolve_version(
 /// Category of cryptographic implementation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum CryptoType {
-    SslTls,            // OpenSSL, LibreSSL, BoringSSL
-    GeneralCrypto,     // Crypto++, libsodium, Bouncy Castle
-    PostQuantum,       // liboqs, Kyber, Dilithium implementations
-    HashFunction,      // Dedicated hash libraries
-    Unknown,           // Detected but not categorized
+    SslTls,        // OpenSSL, LibreSSL, BoringSSL
+    GeneralCrypto, // Crypto++, libsodium, Bouncy Castle
+    PostQuantum,   // liboqs, Kyber, Dilithium implementations
+    HashFunction,  // Dedicated hash libraries
+    Unknown,       // Detected but not categorized
 }
 
 /// Main scanner structure
@@ -555,7 +564,11 @@ impl CryptoScanner {
     }
 
     /// Main scanning entry point
-    pub fn scan(&mut self, root_path: &str, max_depth: Option<usize>) -> Result<(), std::io::Error> {
+    pub fn scan(
+        &mut self,
+        root_path: &str,
+        max_depth: Option<usize>,
+    ) -> Result<(), std::io::Error> {
         // Canonicalize path to prevent directory traversal attacks
         // Defense-in-depth: validates even if CLI layer already canonicalized
         let canonical_path = canonicalize_path(root_path)?;
@@ -573,7 +586,11 @@ impl CryptoScanner {
     }
 
     /// Scan for binary library files
-    fn scan_libraries(&mut self, root_path: &str, max_depth: Option<usize>) -> Result<(), std::io::Error> {
+    fn scan_libraries(
+        &mut self,
+        root_path: &str,
+        max_depth: Option<usize>,
+    ) -> Result<(), std::io::Error> {
         // Disable symlink following to prevent:
         // 1. Symlink loop DoS (circular symlinks causing infinite traversal)
         // 2. Escaping scan boundaries via symlinks to sensitive directories
@@ -591,9 +608,7 @@ impl CryptoScanner {
                 continue;
             }
 
-            let filename = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // Check for library extensions
             if self.is_library_file(filename) {
@@ -620,7 +635,11 @@ impl CryptoScanner {
     }
 
     /// Scan for dependency manifests (Cargo.toml, package.json, etc.)
-    fn scan_manifests(&mut self, root_path: &str, max_depth: Option<usize>) -> Result<(), std::io::Error> {
+    fn scan_manifests(
+        &mut self,
+        root_path: &str,
+        max_depth: Option<usize>,
+    ) -> Result<(), std::io::Error> {
         // Disable symlink following to prevent symlink loops and boundary escapes
         let mut walker = WalkDir::new(root_path).follow_links(false);
 
@@ -635,9 +654,7 @@ impl CryptoScanner {
                 continue;
             }
 
-            let filename = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             match filename {
                 "Cargo.toml" => self.scan_cargo_toml(path)?,
@@ -742,7 +759,8 @@ impl CryptoScanner {
 
                 // Crypto packages declared directly here (so we don't also report
                 // them as transitive).
-                let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                let mut declared: std::collections::HashSet<&str> =
+                    std::collections::HashSet::new();
 
                 if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
                     for (pkg_name, crypto_type) in &crypto_packages {
@@ -782,7 +800,10 @@ impl CryptoScanner {
                                 ecosystem: Ecosystem::Npm,
                                 version: Some(version.clone()),
                                 version_source: VersionSource::Locked,
-                                details: format!("Transitive Node.js package (from package-lock.json): {}", pkg_name),
+                                details: format!(
+                                    "Transitive Node.js package (from package-lock.json): {}",
+                                    pkg_name
+                                ),
                             });
                         }
                     }
@@ -892,20 +913,43 @@ impl CryptoScanner {
             *by_crypto.entry(finding.crypto_type.clone()).or_insert(0) += 1;
         }
 
-        stats.insert("binary_libraries".to_string(), *by_type.get(&FindingType::BinaryLibrary).unwrap_or(&0));
-        stats.insert("static_libraries".to_string(), *by_type.get(&FindingType::StaticLibrary).unwrap_or(&0));
-        stats.insert("manifests".to_string(), *by_type.get(&FindingType::DependencyManifest).unwrap_or(&0));
-        stats.insert("transitive".to_string(), *by_type.get(&FindingType::TransitiveDependency).unwrap_or(&0));
-        stats.insert("ssl_tls".to_string(), *by_crypto.get(&CryptoType::SslTls).unwrap_or(&0));
-        stats.insert("general_crypto".to_string(), *by_crypto.get(&CryptoType::GeneralCrypto).unwrap_or(&0));
-        stats.insert("post_quantum".to_string(), *by_crypto.get(&CryptoType::PostQuantum).unwrap_or(&0));
+        stats.insert(
+            "binary_libraries".to_string(),
+            *by_type.get(&FindingType::BinaryLibrary).unwrap_or(&0),
+        );
+        stats.insert(
+            "static_libraries".to_string(),
+            *by_type.get(&FindingType::StaticLibrary).unwrap_or(&0),
+        );
+        stats.insert(
+            "manifests".to_string(),
+            *by_type.get(&FindingType::DependencyManifest).unwrap_or(&0),
+        );
+        stats.insert(
+            "transitive".to_string(),
+            *by_type
+                .get(&FindingType::TransitiveDependency)
+                .unwrap_or(&0),
+        );
+        stats.insert(
+            "ssl_tls".to_string(),
+            *by_crypto.get(&CryptoType::SslTls).unwrap_or(&0),
+        );
+        stats.insert(
+            "general_crypto".to_string(),
+            *by_crypto.get(&CryptoType::GeneralCrypto).unwrap_or(&0),
+        );
+        stats.insert(
+            "post_quantum".to_string(),
+            *by_crypto.get(&CryptoType::PostQuantum).unwrap_or(&0),
+        );
 
         stats
     }
 
     /// Convert CryptoFinding to LibraryInfo for the dashboard
     fn finding_to_library_info(&self, finding: &CryptoFinding) -> crate::library::LibraryInfo {
-        use crate::library::{LibraryInfo, LibraryCategory, LibraryType};
+        use crate::library::{LibraryCategory, LibraryInfo, LibraryType};
 
         let path = PathBuf::from(&finding.path);
 
@@ -928,7 +972,7 @@ impl CryptoScanner {
             FindingType::StaticLibrary => LibraryType::StaticLibrary,
             FindingType::DependencyManifest => LibraryType::Manifest,
             FindingType::TransitiveDependency => LibraryType::Manifest, // Resolved from lockfile
-            FindingType::SourceCode => LibraryType::Manifest, // Treat as manifest for now
+            FindingType::SourceCode => LibraryType::Manifest,           // Treat as manifest for now
         };
 
         // Assess risk based on category and library name
@@ -957,7 +1001,11 @@ impl CryptoScanner {
     }
 
     /// Assess quantum risk based on library name and category
-    fn assess_risk(&self, name: &str, category: &crate::library::LibraryCategory) -> (crate::library::RiskLevel, bool) {
+    fn assess_risk(
+        &self,
+        name: &str,
+        category: &crate::library::LibraryCategory,
+    ) -> (crate::library::RiskLevel, bool) {
         use crate::library::{LibraryCategory, RiskLevel};
 
         let lower_name = name.to_lowercase();
@@ -978,7 +1026,8 @@ impl CryptoScanner {
         }
 
         // ECC is medium risk (longer quantum resistance than RSA)
-        if lower_name.contains("ecc") || lower_name.contains("ecdsa") || lower_name.contains("ecdh") {
+        if lower_name.contains("ecc") || lower_name.contains("ecdsa") || lower_name.contains("ecdh")
+        {
             return (RiskLevel::Medium, true);
         }
 
@@ -1042,9 +1091,7 @@ impl CryptoScanner {
                 continue;
             }
 
-            let filename = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // Check for library files
             if self.is_library_file(filename) {
@@ -1117,7 +1164,11 @@ impl CryptoScanner {
     }
 
     /// Streaming version of scan_cargo_toml
-    fn scan_cargo_toml_streaming<F>(&mut self, path: &Path, callback: &mut F) -> Result<(), std::io::Error>
+    fn scan_cargo_toml_streaming<F>(
+        &mut self,
+        path: &Path,
+        callback: &mut F,
+    ) -> Result<(), std::io::Error>
     where
         F: FnMut(StreamingScanEvent),
     {
@@ -1194,7 +1245,11 @@ impl CryptoScanner {
     }
 
     /// Streaming version of scan_package_json
-    fn scan_package_json_streaming<F>(&mut self, path: &Path, callback: &mut F) -> Result<(), std::io::Error>
+    fn scan_package_json_streaming<F>(
+        &mut self,
+        path: &Path,
+        callback: &mut F,
+    ) -> Result<(), std::io::Error>
     where
         F: FnMut(StreamingScanEvent),
     {
@@ -1212,7 +1267,8 @@ impl CryptoScanner {
                 let crypto_packages = npm_crypto_packages();
                 let lock = crate::lockfile::resolve_npm_from_sibling_lock(path);
 
-                let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
+                let mut declared: std::collections::HashSet<&str> =
+                    std::collections::HashSet::new();
 
                 if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
                     for (pkg_name, crypto_type) in &crypto_packages {
@@ -1254,7 +1310,10 @@ impl CryptoScanner {
                                 ecosystem: Ecosystem::Npm,
                                 version: Some(version.clone()),
                                 version_source: VersionSource::Locked,
-                                details: format!("Transitive Node.js package (from package-lock.json): {}", pkg_name),
+                                details: format!(
+                                    "Transitive Node.js package (from package-lock.json): {}",
+                                    pkg_name
+                                ),
                             };
 
                             let library_info = self.finding_to_library_info(&finding);
@@ -1271,7 +1330,11 @@ impl CryptoScanner {
     }
 
     /// Streaming version of scan_requirements_txt
-    fn scan_requirements_txt_streaming<F>(&mut self, path: &Path, callback: &mut F) -> Result<(), std::io::Error>
+    fn scan_requirements_txt_streaming<F>(
+        &mut self,
+        path: &Path,
+        callback: &mut F,
+    ) -> Result<(), std::io::Error>
     where
         F: FnMut(StreamingScanEvent),
     {
@@ -1294,7 +1357,11 @@ impl CryptoScanner {
     }
 
     /// Streaming version of scan_pyproject_toml
-    fn scan_pyproject_toml_streaming<F>(&mut self, path: &Path, callback: &mut F) -> Result<(), std::io::Error>
+    fn scan_pyproject_toml_streaming<F>(
+        &mut self,
+        path: &Path,
+        callback: &mut F,
+    ) -> Result<(), std::io::Error>
     where
         F: FnMut(StreamingScanEvent),
     {
@@ -1318,7 +1385,11 @@ impl CryptoScanner {
     }
 
     /// Streaming version of scan_pipfile
-    fn scan_pipfile_streaming<F>(&mut self, path: &Path, callback: &mut F) -> Result<(), std::io::Error>
+    fn scan_pipfile_streaming<F>(
+        &mut self,
+        path: &Path,
+        callback: &mut F,
+    ) -> Result<(), std::io::Error>
     where
         F: FnMut(StreamingScanEvent),
     {
@@ -1381,7 +1452,10 @@ mod tests {
     #[test]
     fn pep508_name_extraction() {
         assert_eq!(pep508_name("cryptography>=41.0"), Some("cryptography"));
-        assert_eq!(pep508_name("PyNaCl==1.5.0 ; python_version>='3.8'"), Some("PyNaCl"));
+        assert_eq!(
+            pep508_name("PyNaCl==1.5.0 ; python_version>='3.8'"),
+            Some("PyNaCl")
+        );
         assert_eq!(pep508_name("bcrypt[extra]"), Some("bcrypt"));
         assert_eq!(pep508_name(">=1.0"), None);
     }
@@ -1406,7 +1480,11 @@ requests==2.31.0
         assert_eq!(nacl.version_source, VersionSource::Declared);
 
         let bcrypt = findings.iter().find(|f| f.name == "bcrypt").unwrap();
-        assert_eq!(bcrypt.version.as_deref(), Some("4.1.2"), "inline comment stripped");
+        assert_eq!(
+            bcrypt.version.as_deref(),
+            Some("4.1.2"),
+            "inline comment stripped"
+        );
         assert_eq!(bcrypt.version_source, VersionSource::Locked);
 
         // Non-crypto package is ignored.

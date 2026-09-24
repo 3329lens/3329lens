@@ -97,9 +97,8 @@ impl Version {
         let normalized = s.trim().to_lowercase();
         let caps = version_re().captures(&normalized)?;
 
-        let num = |name: &str| -> Option<u64> {
-            caps.name(name).and_then(|m| m.as_str().parse().ok())
-        };
+        let num =
+            |name: &str| -> Option<u64> { caps.name(name).and_then(|m| m.as_str().parse().ok()) };
 
         // A present-but-overflowing number is malformed, not "0": bail if a
         // group matched text that doesn't fit u64.
@@ -167,7 +166,16 @@ impl Version {
     /// Ordering key per the spec: trailing zeros in the release are
     /// insignificant (`1.0 == 1.0.0`); dev/pre/post markers order around the
     /// final release; local segments break remaining ties.
-    fn key(&self) -> (u64, &[u64], PreKey, Option<u64>, (bool, u64), &[LocalSegment]) {
+    fn key(
+        &self,
+    ) -> (
+        u64,
+        &[u64],
+        PreKey,
+        Option<u64>,
+        (bool, u64),
+        &[LocalSegment],
+    ) {
         let mut end = self.release.len();
         while end > 1 && self.release[end - 1] == 0 {
             end -= 1;
@@ -188,7 +196,14 @@ impl Version {
             None => (true, 0),
         };
 
-        (self.epoch, &self.release[..end], pre_key, post_key, dev_key, &self.local)
+        (
+            self.epoch,
+            &self.release[..end],
+            pre_key,
+            post_key,
+            dev_key,
+            &self.local,
+        )
     }
 }
 
@@ -284,14 +299,30 @@ mod tests {
     #[test]
     fn parses_forms_semver_cannot() {
         // Every one of these is skipped by semver::Version::parse today.
-        for s in ["1.0", "3.1", "2026.6", "1!2.0", "1.0a1", "1.0.post1", "1.0.dev3", "1.0+local.5"] {
+        for s in [
+            "1.0",
+            "3.1",
+            "2026.6",
+            "1!2.0",
+            "1.0a1",
+            "1.0.post1",
+            "1.0.dev3",
+            "1.0+local.5",
+        ] {
             assert!(Version::parse(s).is_some(), "{s:?} should parse");
         }
     }
 
     #[test]
     fn rejects_non_versions() {
-        for s in ["", "not-a-version", "1.0.x", "1..0", "1.0-beta-extra-junk!", "*"] {
+        for s in [
+            "",
+            "not-a-version",
+            "1.0.x",
+            "1..0",
+            "1.0-beta-extra-junk!",
+            "*",
+        ] {
             assert!(Version::parse(s).is_none(), "{s:?} should be rejected");
         }
     }
@@ -384,8 +415,13 @@ mod tests {
         assert!(Requirement::parse("== 1.0").unwrap().matches(&v("1.0.0")));
         assert!(Requirement::parse("!= 1.0").unwrap().matches(&v("1.0.1")));
         assert!(Requirement::parse("<= 1.0").unwrap().matches(&v("1.0")));
-        assert!(Requirement::parse("> 1.0").unwrap().matches(&v("1.0.post1")));
-        assert!(Requirement::parse("~= 1.0").is_none(), "pip-only operator unsupported");
+        assert!(Requirement::parse("> 1.0")
+            .unwrap()
+            .matches(&v("1.0.post1")));
+        assert!(
+            Requirement::parse("~= 1.0").is_none(),
+            "pip-only operator unsupported"
+        );
         assert!(Requirement::parse(">= not.a.version").is_none());
     }
 }
