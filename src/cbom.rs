@@ -404,7 +404,7 @@ pub fn findings_to_cbom(findings: &[CryptoFinding], target: &str) -> Bom {
         }
 
         // --- SSL/TLS libraries additionally expose the TLS protocol ---
-        if finding.crypto_type == CryptoType::SSL_TLS {
+        if finding.crypto_type == CryptoType::SslTls {
             let proto_ref = "crypto/protocol/tls".to_string();
             if algo_emitted.insert(proto_ref.clone()) {
                 bom.components.push(Component {
@@ -799,7 +799,7 @@ mod tests {
     fn every_dependency_ref_resolves_to_a_component() {
         let findings = vec![
             finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, Some("0.17"), "/p/Cargo.toml"),
-            finding("openssl", Ecosystem::Cargo, CryptoType::SSL_TLS, Some("0.10"), "/p/Cargo.toml"),
+            finding("openssl", Ecosystem::Cargo, CryptoType::SslTls, Some("0.10"), "/p/Cargo.toml"),
         ];
         let bom = findings_to_cbom(&findings, "target");
         let refs: HashSet<&str> = bom
@@ -820,7 +820,7 @@ mod tests {
         // ring and openssl both imply SHA-256 / AES-256.
         let findings = vec![
             finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, None, "/a"),
-            finding("openssl", Ecosystem::Cargo, CryptoType::SSL_TLS, None, "/b"),
+            finding("openssl", Ecosystem::Cargo, CryptoType::SslTls, None, "/b"),
         ];
         let bom = findings_to_cbom(&findings, "t");
         let sha = bom.components.iter().filter(|c| c.name == "SHA-256").count();
@@ -850,7 +850,7 @@ mod tests {
         let findings = vec![finding(
             "openssl",
             Ecosystem::System,
-            CryptoType::SSL_TLS,
+            CryptoType::SslTls,
             None,
             "/lib/libssl.so",
         )];
@@ -870,7 +870,7 @@ mod tests {
     fn purls_only_for_packaged_ecosystems() {
         let findings = vec![
             finding("ring", Ecosystem::Cargo, CryptoType::GeneralCrypto, Some("0.17"), "/a"),
-            finding("libssl.so", Ecosystem::System, CryptoType::SSL_TLS, None, "/lib/libssl.so"),
+            finding("libssl.so", Ecosystem::System, CryptoType::SslTls, None, "/lib/libssl.so"),
         ];
         let bom = findings_to_cbom(&findings, "t");
         let ring = bom.components.iter().find(|c| c.name == "ring").unwrap();
@@ -947,7 +947,7 @@ mod tests {
         let findings = vec![finding(
             "openssl",
             Ecosystem::Cargo,
-            CryptoType::SSL_TLS,
+            CryptoType::SslTls,
             Some("0.10"),
             "/p/Cargo.toml",
         )];

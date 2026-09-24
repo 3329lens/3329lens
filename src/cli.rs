@@ -238,7 +238,7 @@ fn handle_scan(path: &str, depth: Option<usize>, format: &str, output: Option<&s
                     };
 
                     let crypto_color = match finding.crypto_type {
-                        scanner_core::scanner::CryptoType::SSL_TLS => "green",
+                        scanner_core::scanner::CryptoType::SslTls => "green",
                         scanner_core::scanner::CryptoType::GeneralCrypto => "cyan",
                         scanner_core::scanner::CryptoType::PostQuantum => "magenta",
                         scanner_core::scanner::CryptoType::HashFunction => "yellow",

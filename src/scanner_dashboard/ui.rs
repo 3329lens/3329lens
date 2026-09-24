@@ -847,7 +847,9 @@ fn render_detail_view(f: &mut Frame, state: &ScannerDashboardState) {
     ]));
 
     // Add modified date
-    if let Ok(duration) = lib.modified.duration_since(std::time::UNIX_EPOCH) {
+    // The guard rejects pre-epoch timestamps, which `DateTime::from` would render
+    // misleadingly; the duration itself is not needed, only its validity.
+    if lib.modified.duration_since(std::time::UNIX_EPOCH).is_ok() {
         use chrono::{DateTime, Utc};
         let datetime = DateTime::<Utc>::from(lib.modified);
         detail_lines.push(Line::from(vec![

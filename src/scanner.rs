@@ -22,7 +22,6 @@ use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::time::SystemTime;
 use serde::{Serialize, Deserialize};
-use std::sync::mpsc::Sender;
 
 /// Maximum file size for manifest files (10 MB)
 /// Prevents DoS attacks via maliciously large Cargo.toml, package.json, etc.
@@ -177,8 +176,8 @@ pub enum FindingType {
 fn cargo_crypto_crates() -> Vec<(&'static str, CryptoType)> {
     vec![
         ("ring", CryptoType::GeneralCrypto),
-        ("rustls", CryptoType::SSL_TLS),
-        ("openssl", CryptoType::SSL_TLS),
+        ("rustls", CryptoType::SslTls),
+        ("openssl", CryptoType::SslTls),
         ("sodiumoxide", CryptoType::GeneralCrypto),
         ("chacha20", CryptoType::GeneralCrypto),
         ("aes", CryptoType::GeneralCrypto),
@@ -271,8 +270,8 @@ fn npm_crypto_packages() -> Vec<(&'static str, CryptoType)> {
         ("blakejs", CryptoType::HashFunction),
         ("md5", CryptoType::HashFunction),
         // X.509 / TLS certificate tooling.
-        ("selfsigned", CryptoType::SSL_TLS),
-        ("pem", CryptoType::SSL_TLS),
+        ("selfsigned", CryptoType::SslTls),
+        ("pem", CryptoType::SslTls),
         // Post-quantum.
         ("@noble/post-quantum", CryptoType::PostQuantum),
     ]
@@ -285,7 +284,7 @@ fn pypi_crypto_packages() -> Vec<(&'static str, CryptoType)> {
     vec![
         ("cryptography", CryptoType::GeneralCrypto),
         ("pycryptodome", CryptoType::GeneralCrypto),
-        ("pyopenssl", CryptoType::SSL_TLS),
+        ("pyopenssl", CryptoType::SslTls),
         ("pynacl", CryptoType::GeneralCrypto),
         ("bcrypt", CryptoType::GeneralCrypto),
     ]
@@ -508,7 +507,7 @@ fn resolve_version(
 /// Category of cryptographic implementation
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub enum CryptoType {
-    SSL_TLS,           // OpenSSL, LibreSSL, BoringSSL
+    SslTls,            // OpenSSL, LibreSSL, BoringSSL
     GeneralCrypto,     // Crypto++, libsodium, Bouncy Castle
     PostQuantum,       // liboqs, Kyber, Dilithium implementations
     HashFunction,      // Dedicated hash libraries
@@ -526,13 +525,13 @@ impl CryptoScanner {
         let mut library_patterns = HashMap::new();
 
         // SSL/TLS libraries
-        library_patterns.insert("libssl".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("libcrypto".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("openssl".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("libressl".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("boringssl".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("mbedtls".to_string(), CryptoType::SSL_TLS);
-        library_patterns.insert("wolfssl".to_string(), CryptoType::SSL_TLS);
+        library_patterns.insert("libssl".to_string(), CryptoType::SslTls);
+        library_patterns.insert("libcrypto".to_string(), CryptoType::SslTls);
+        library_patterns.insert("openssl".to_string(), CryptoType::SslTls);
+        library_patterns.insert("libressl".to_string(), CryptoType::SslTls);
+        library_patterns.insert("boringssl".to_string(), CryptoType::SslTls);
+        library_patterns.insert("mbedtls".to_string(), CryptoType::SslTls);
+        library_patterns.insert("wolfssl".to_string(), CryptoType::SslTls);
 
         // General crypto libraries
         library_patterns.insert("libsodium".to_string(), CryptoType::GeneralCrypto);
@@ -897,7 +896,7 @@ impl CryptoScanner {
         stats.insert("static_libraries".to_string(), *by_type.get(&FindingType::StaticLibrary).unwrap_or(&0));
         stats.insert("manifests".to_string(), *by_type.get(&FindingType::DependencyManifest).unwrap_or(&0));
         stats.insert("transitive".to_string(), *by_type.get(&FindingType::TransitiveDependency).unwrap_or(&0));
-        stats.insert("ssl_tls".to_string(), *by_crypto.get(&CryptoType::SSL_TLS).unwrap_or(&0));
+        stats.insert("ssl_tls".to_string(), *by_crypto.get(&CryptoType::SslTls).unwrap_or(&0));
         stats.insert("general_crypto".to_string(), *by_crypto.get(&CryptoType::GeneralCrypto).unwrap_or(&0));
         stats.insert("post_quantum".to_string(), *by_crypto.get(&CryptoType::PostQuantum).unwrap_or(&0));
 
@@ -916,7 +915,7 @@ impl CryptoScanner {
 
         // Convert CryptoType to LibraryCategory
         let category = match finding.crypto_type {
-            CryptoType::SSL_TLS => LibraryCategory::SslTls,
+            CryptoType::SslTls => LibraryCategory::SslTls,
             CryptoType::GeneralCrypto => LibraryCategory::GeneralCrypto,
             CryptoType::PostQuantum => LibraryCategory::PostQuantum,
             CryptoType::HashFunction => LibraryCategory::HashFunction,
@@ -1115,34 +1114,6 @@ impl CryptoScanner {
         });
 
         Ok(())
-    }
-
-    /// Estimate file count for progress reporting
-    fn estimate_file_count(&self, root_path: &str, max_depth: Option<usize>) -> Option<usize> {
-        // Canonicalize for consistency (errors here are non-fatal, return None)
-        let canonical_path = match canonicalize_path(root_path) {
-            Ok(p) => p,
-            Err(_) => return None,
-        };
-
-        // Disable symlink following for consistency with scan functions
-        let mut walker = WalkDir::new(&canonical_path).follow_links(false);
-        if let Some(depth) = max_depth {
-            walker = walker.max_depth(depth);
-        }
-
-        // Quick count (could timeout for very large trees)
-        let count = walker.into_iter()
-            .take(10000) // Limit to prevent hanging
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_file())
-            .count();
-
-        if count >= 10000 {
-            None // Too many to count quickly
-        } else {
-            Some(count)
-        }
     }
 
     /// Streaming version of scan_cargo_toml

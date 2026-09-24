@@ -8,9 +8,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # `-D warnings` is deliberately NOT set yet: the moved sources carry four
-  # pre-existing warnings from the monorepo. Add it in the same follow-up commit
-  # that clears them and makes the style job blocking.
+  # `-D warnings` is still NOT set. The four rustc warnings inherited from the
+  # monorepo are now cleared, but `cargo clippy --all-targets` reports ~21 lints,
+  # and `-D warnings` denies those too. Clear the clippy set, then set this and
+  # drop `continue-on-error` from the style job in the same commit.
 
 jobs:
   # Portability is a product claim, so prove it on every push. There is no
