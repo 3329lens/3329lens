@@ -13,10 +13,58 @@ Everything runs offline. The scanner makes no network requests.
 
 ## Install
 
+3329lens is installed from source with Cargo. It is pure Rust, with no
+assembly or C crypto to compile, and CI tests it on Linux, macOS (Intel and
+Apple Silicon) and Windows. Prebuilt binaries are not offered yet.
+
 ```bash
-cargo install lens3329      # installs the `3329lens` binary
+cargo install --locked lens3329      # installs the `3329lens` binary
 3329lens --help
 ```
+
+`--locked` builds against the dependency versions 3329lens was tested with,
+rather than whatever is newest on crates.io today.
+
+If you don't have Rust yet, install it with [rustup](https://rustup.rs) first:
+
+### Linux and macOS
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+cargo install --locked lens3329
+```
+
+On macOS, if the build fails with a linker error, install Apple's command line
+tools with `xcode-select --install`. On a minimal Linux install, the
+equivalent is your distribution's C toolchain (`build-essential` on
+Debian/Ubuntu, `gcc` on Fedora), which Rust needs to link the final binary.
+
+### Windows
+
+1. Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs).
+   When it asks, let it install the **Visual Studio C++ Build Tools**. Rust
+   needs Microsoft's linker to produce a Windows executable.
+2. Open a **new** PowerShell or Command Prompt window, then run:
+
+   ```powershell
+   cargo install --locked lens3329
+   3329lens --help
+   ```
+
+Under WSL, follow the Linux steps instead. A WSL install can scan your
+Windows drives through `/mnt/c/...`, but scanning large Windows trees across
+that boundary is much slower than a native Windows build.
+
+### After installing
+
+The binary goes in Cargo's bin directory: `~/.cargo/bin` on Linux and macOS,
+`%USERPROFILE%\.cargo\bin` on Windows. rustup adds that directory to your
+`PATH`, but only shells opened after the install pick up the change. If you
+get `3329lens: command not found`, open a new terminal.
+
+To upgrade, run the same `cargo install --locked lens3329` again. To remove
+3329lens, run `cargo uninstall lens3329`.
 
 Pre-1.0. See [SECURITY.md](SECURITY.md) for the support and disclosure policy.
 
