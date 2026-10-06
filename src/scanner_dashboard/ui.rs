@@ -21,7 +21,7 @@ pub fn render(f: &mut Frame, state: &ScannerDashboardState) {
             Constraint::Min(0),    // Main content
             Constraint::Length(2), // Footer
         ])
-        .split(f.size());
+        .split(f.area());
 
     render_header(f, state, chunks[0]);
 
@@ -1022,7 +1022,7 @@ fn render_detail_view(f: &mut Frame, state: &ScannerDashboardState) {
     };
 
     // Create a centered modal overlay (80% width, 85% height)
-    let area = f.size();
+    let area = f.area();
     let popup_width = (area.width as f32 * 0.80) as u16;
     let popup_height = (area.height as f32 * 0.85) as u16;
 
@@ -1280,7 +1280,7 @@ fn render_completion_notification(f: &mut Frame, state: &ScannerDashboardState) 
     use crate::scanner_dashboard::widgets::format_duration;
 
     // Create a centered modal overlay (65% width, 75% height)
-    let area = f.size();
+    let area = f.area();
     let popup_width = (area.width as f32 * 0.65) as u16;
     let popup_height = (area.height as f32 * 0.75) as u16;
 
@@ -1506,7 +1506,7 @@ fn render_completion_notification(f: &mut Frame, state: &ScannerDashboardState) 
 
 fn render_help_overlay(f: &mut Frame, _state: &ScannerDashboardState) {
     // Create a centered modal overlay (70% width, 80% height)
-    let area = f.size();
+    let area = f.area();
     let popup_width = (area.width as f32 * 0.70) as u16;
     let popup_height = (area.height as f32 * 0.80) as u16;
 
