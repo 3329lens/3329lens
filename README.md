@@ -220,7 +220,7 @@ The scanning and correlation core is usable on its own, with no UI dependencies:
 
 ```toml
 [dependencies]
-lens3329 = { version = "0.1", default-features = false }
+lens3329 = { version = "0.2", default-features = false }
 ```
 
 ```rust
