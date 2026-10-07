@@ -1,7 +1,7 @@
 //! SARIF 2.1.0 output for correlated vulnerabilities.
 //!
 //! Emits a Static Analysis Results Interchange Format log so that the CVEs
-//! Slow Lynx correlates (from a lockfile-resolved scan against an offline
+//! this crate correlates (from a lockfile-resolved scan against an offline
 //! advisory DB) surface natively in GitHub / GitLab code scanning, the VS Code
 //! SARIF Viewer, and most SAST dashboards.
 //!
@@ -17,12 +17,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::advisories::{CorrelationResult, Severity};
+use crate::tool::ToolInfo;
 
 const SARIF_VERSION: &str = "2.1.0";
 const SARIF_SCHEMA: &str =
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json";
-const TOOL_NAME: &str = "slow-lynx";
-const TOOL_INFO_URI: &str = "https://gitlab.com/lomyen/slow_lynx_cryptography_discovery";
+/// Key for our entry in each result's `partialFingerprints`. Code-scanning
+/// services match alerts across runs by fingerprint, so this names the
+/// fingerprint *scheme*, not the calling tool, and must stay stable.
+const FINGERPRINT_KEY: &str = "3329lens/v1";
 
 #[derive(Debug, Serialize)]
 pub struct SarifLog {
@@ -149,7 +152,15 @@ fn relativize(path: &str, root: &str) -> String {
 /// `root` is the canonicalized scan root used to relativize result locations.
 /// An empty `correlation` (e.g. no `--advisory-db` supplied) yields a valid
 /// run with empty `rules`/`results`.
+///
+/// The log names 3329lens as the tool (`runs[].tool.driver`); use
+/// [`build_with_tool`] to name a different one.
 pub fn build(correlation: &CorrelationResult, root: &str) -> SarifLog {
+    build_with_tool(correlation, root, &ToolInfo::default())
+}
+
+/// Like [`build`], but records `tool` as the tool that produced the log.
+pub fn build_with_tool(correlation: &CorrelationResult, root: &str, tool: &ToolInfo) -> SarifLog {
     // Deduplicate advisories into rules by id, preserving first-seen order.
     let mut rules: Vec<ReportingDescriptor> = Vec::new();
     let mut rule_index: HashMap<String, ()> = HashMap::new();
@@ -181,7 +192,7 @@ pub fn build(correlation: &CorrelationResult, root: &str) -> SarifLog {
 
             let mut fingerprints = HashMap::new();
             fingerprints.insert(
-                "slowLynx/v1".to_string(),
+                FINGERPRINT_KEY.to_string(),
                 format!("{}:{}:{}", adv.id, m.name, m.version),
             );
 
@@ -221,9 +232,9 @@ pub fn build(correlation: &CorrelationResult, root: &str) -> SarifLog {
         runs: vec![Run {
             tool: Tool {
                 driver: ToolComponent {
-                    name: TOOL_NAME.to_string(),
-                    version: env!("CARGO_PKG_VERSION").to_string(),
-                    information_uri: TOOL_INFO_URI.to_string(),
+                    name: tool.name.clone(),
+                    version: tool.version.clone(),
+                    information_uri: tool.information_uri.clone(),
                     rules,
                 },
             },
@@ -337,7 +348,52 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["version"], "2.1.0");
         assert!(v["$schema"].is_string());
-        assert_eq!(v["runs"][0]["tool"]["driver"]["name"], "slow-lynx");
+        assert_eq!(v["runs"][0]["tool"]["driver"]["name"], "3329lens");
+    }
+
+    #[test]
+    fn default_tool_is_3329lens() {
+        let driver = &build(&CorrelationResult::default(), "/scan").runs[0]
+            .tool
+            .driver;
+        assert_eq!(driver.name, "3329lens");
+        assert_eq!(driver.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            driver.information_uri,
+            "https://github.com/3329lens/3329lens"
+        );
+    }
+
+    #[test]
+    fn caller_supplied_tool_is_used() {
+        let tool = ToolInfo::new("other-tool", "9.9.9", "https://example.com/other");
+        let driver = &build_with_tool(&CorrelationResult::default(), "/scan", &tool).runs[0]
+            .tool
+            .driver;
+        assert_eq!(driver.name, "other-tool");
+        assert_eq!(driver.version, "9.9.9");
+        assert_eq!(driver.information_uri, "https://example.com/other");
+    }
+
+    #[test]
+    fn fingerprint_key_does_not_depend_on_tool() {
+        let corr = result_with(vec![FindingMatch {
+            name: "ring".into(),
+            version: "0.17.5".into(),
+            path: "/scan/Cargo.lock".into(),
+            advisories: vec![advisory("RUSTSEC-2025-0009", Severity::Medium, Some(5.3))],
+        }]);
+        let tool = ToolInfo::new("other-tool", "1.0.0", "https://example.com");
+        for log in [
+            build(&corr, "/scan"),
+            build_with_tool(&corr, "/scan", &tool),
+        ] {
+            let fp = &log.runs[0].results[0].partial_fingerprints;
+            assert_eq!(
+                fp.get(FINGERPRINT_KEY).map(String::as_str),
+                Some("RUSTSEC-2025-0009:ring:0.17.5")
+            );
+        }
     }
 
     #[test]
