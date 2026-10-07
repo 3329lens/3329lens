@@ -18,6 +18,7 @@ pub mod lockfile;
 pub mod pep440;
 pub mod sarif;
 pub mod scanner;
+pub mod tool;
 
 #[cfg(feature = "cli")]
 pub mod cli;

@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use crate::scanner::{CryptoFinding, CryptoType, Ecosystem};
+use crate::tool::ToolInfo;
 
 /// Top-level CycloneDX BOM document.
 ///
@@ -60,15 +61,22 @@ impl Bom {
     /// Create an empty BOM envelope for a scan of `target`.
     ///
     /// Populates `bomFormat`, `specVersion`, `version`, and a `metadata` block
-    /// with the current timestamp and this tool's identity. Components and
-    /// dependencies start empty and are filled by the (future) converter.
+    /// with the current timestamp and 3329lens as the generating tool.
+    /// Components and dependencies start empty. Use [`Bom::with_tool`] to name
+    /// a different tool.
     pub fn new(target: &str) -> Self {
+        Self::with_tool(target, &ToolInfo::default())
+    }
+
+    /// Like [`Bom::new`], but records `tool` as the generating tool in
+    /// `metadata.tools`.
+    pub fn with_tool(target: &str, tool: &ToolInfo) -> Self {
         Self {
             bom_format: "CycloneDX".to_string(),
             spec_version: "1.6".to_string(),
             serial_number: None,
             version: 1,
-            metadata: Metadata::for_target(target),
+            metadata: Metadata::for_target(target, tool),
             components: Vec::new(),
             dependencies: Vec::new(),
             vulnerabilities: Vec::new(),
@@ -104,12 +112,12 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    fn for_target(target: &str) -> Self {
+    fn for_target(target: &str, tool: &ToolInfo) -> Self {
         Self {
             timestamp: chrono::Utc::now().to_rfc3339(),
             tools: vec![Tool {
-                name: "slow_lynx".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                name: tool.name.clone(),
+                version: Some(tool.version.clone()),
             }],
             component: Some(Component {
                 component_type: ComponentType::Application,
@@ -319,8 +327,21 @@ pub struct Affects {
 /// IMPORTANT: algorithm assets are inferred from library *identity*, not from
 /// observed runtime calls. This is a teaching-grade CBOM: presence of an
 /// algorithm asset means "this library can do X", not "X is actually invoked".
+///
+/// The BOM names 3329lens as the generating tool; use
+/// [`findings_to_cbom_with_tool`] to name a different one.
 pub fn findings_to_cbom(findings: &[CryptoFinding], target: &str) -> Bom {
-    let mut bom = Bom::new(target);
+    findings_to_cbom_with_tool(findings, target, &ToolInfo::default())
+}
+
+/// Like [`findings_to_cbom`], but records `tool` as the generating tool in
+/// `metadata.tools`.
+pub fn findings_to_cbom_with_tool(
+    findings: &[CryptoFinding],
+    target: &str,
+    tool: &ToolInfo,
+) -> Bom {
+    let mut bom = Bom::with_tool(target, tool);
     // (ecosystem, name, version) -> index of the library component.
     let mut lib_index: HashMap<String, usize> = HashMap::new();
     // algorithm bom-ref -> already emitted as a component (dedup across libs).
@@ -478,8 +499,8 @@ fn build_purl(ecosystem: &Ecosystem, name: &str, version: Option<&str>) -> Optio
 }
 
 /// Format 16 random bytes as an RFC 4122 version-4 UUID string (no `urn:uuid:`
-/// prefix). The caller supplies entropy — Slow Lynx uses its own CSPRNG — so
-/// this stays a pure, testable transform. Sets the version (4) and variant bits.
+/// prefix). The caller supplies the entropy (the 3329lens CLI uses `getrandom`)
+/// so this stays a pure, testable transform. Sets the version (4) and variant bits.
 pub fn format_uuid_v4(mut bytes: [u8; 16]) -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
     bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
@@ -949,6 +970,37 @@ mod tests {
         assert_eq!(bom.bom_format, "CycloneDX");
         assert_eq!(bom.spec_version, "1.6");
         assert_eq!(bom.version, 1);
+    }
+
+    #[test]
+    fn default_tool_is_3329lens() {
+        let bom = findings_to_cbom(&[], "target");
+        assert_eq!(bom.metadata.tools.len(), 1);
+        assert_eq!(bom.metadata.tools[0].name, "3329lens");
+        assert_eq!(
+            bom.metadata.tools[0].version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn caller_supplied_tool_is_used() {
+        let findings = vec![finding(
+            "ring",
+            Ecosystem::Cargo,
+            CryptoType::GeneralCrypto,
+            Some("0.17"),
+            "/p/Cargo.toml",
+        )];
+        let tool = ToolInfo::new("other-tool", "9.9.9", "https://example.com/other");
+        let bom = findings_to_cbom_with_tool(&findings, "target", &tool);
+        assert_eq!(bom.metadata.tools.len(), 1);
+        assert_eq!(bom.metadata.tools[0].name, "other-tool");
+        assert_eq!(bom.metadata.tools[0].version.as_deref(), Some("9.9.9"));
+        // Only the tool identity differs; the inventory itself is unchanged.
+        let default = findings_to_cbom(&findings, "target");
+        assert_eq!(bom.components.len(), default.components.len());
+        assert_eq!(bom.dependencies.len(), default.dependencies.len());
     }
 
     #[test]
