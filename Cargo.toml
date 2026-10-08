@@ -16,6 +16,8 @@ categories = ["cryptography", "development-tools"]
 repository = "https://github.com/3329lens/3329lens"
 homepage = "https://3329lens.dev"
 documentation = "https://docs.rs/lens3329"
+# Repo-only notes for coding agents; not part of the published crate.
+exclude = ["CLAUDE.md"]
 
 [lib]
 name = "lens3329"
