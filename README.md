@@ -301,4 +301,4 @@ one: if `--fail-on` passes when it should have failed, we want to hear about it.
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and
 [NOTICE](NOTICE).
 
-Copyright 2026 Lomyen Ltd.
+Copyright 2026 Lomyen Ltd. Developed by Lomyen Ltd — [lomyen.help](https://www.lomyen.help).
