@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 pub use scanner_core::library::{LibraryCategory, LibraryInfo, LibraryType, RiskLevel};
 
 const MAX_RECENT_LIBRARIES: usize = 50; // Ring buffer size for recent discoveries
+const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(8); // How long footer status messages stay visible
 
 // Indexed library storage for O(1) lookups
 pub struct LibraryStore {
@@ -211,6 +212,17 @@ pub struct ScannerDashboardState {
 
     // Completion notification state
     pub completion_notification_shown: bool,
+
+    // Footer status message (export results etc.)
+    pub status_message: Option<StatusMessage>,
+}
+
+/// A transient message shown in the footer, e.g. the result of an export.
+#[derive(Debug, Clone)]
+pub struct StatusMessage {
+    pub text: String,
+    pub is_error: bool,
+    pub shown_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,6 +356,7 @@ impl ScannerDashboardState {
             detail_library: None,
             help_overlay_open: false,
             completion_notification_shown: false,
+            status_message: None,
         }
     }
 
@@ -617,6 +630,22 @@ impl ScannerDashboardState {
 
     pub fn close_help_overlay(&mut self) {
         self.help_overlay_open = false;
+    }
+
+    // Status message methods
+    pub fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
+        self.status_message = Some(StatusMessage {
+            text: text.into(),
+            is_error,
+            shown_at: Instant::now(),
+        });
+    }
+
+    /// The footer status message, if one was set recently enough to show.
+    pub fn active_status(&self) -> Option<&StatusMessage> {
+        self.status_message
+            .as_ref()
+            .filter(|m| m.shown_at.elapsed() < STATUS_MESSAGE_TTL)
     }
 
     // Completion notification methods

@@ -998,14 +998,28 @@ fn render_footer(f: &mut Frame, state: &ScannerDashboardState, area: Rect) {
 
     let sort_status = format!(" [Sort: {:?}] ", state.sort_by);
 
-    let footer_text = vec![
-        Line::from(vec![
+    // A recent status message (e.g. an export result) temporarily replaces
+    // the risk summary line.
+    let first_line = match state.active_status() {
+        Some(msg) => {
+            let color = if msg.is_error {
+                Color::Red
+            } else {
+                Color::Green
+            };
+            Line::from(Span::styled(
+                format!(" {} ", msg.text),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ))
+        }
+        None => Line::from(vec![
             Span::raw(status_line),
             Span::styled(filter_status, Style::default().fg(Color::Yellow)),
             Span::styled(sort_status, Style::default().fg(Color::Cyan)),
         ]),
-        Line::from(view_controls),
-    ];
+    };
+
+    let footer_text = vec![first_line, Line::from(view_controls)];
 
     let footer = Paragraph::new(footer_text).style(Style::default().fg(Color::White));
 
