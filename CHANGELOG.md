@@ -5,6 +5,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [Semantic Versioning](https://semver.org/). Before 1.0, a
 breaking change bumps the minor version (0.1 → 0.2).
 
+## [Unreleased]
+
+### Fixed
+
+- **Dashboard export errors were unreadable and left out the file path.** The
+  `e` (JSON / migration plan) and `v` (CSV) exports in `scanner-dashboard`
+  printed failures to stderr while the terminal was in raw mode, which garbled
+  the screen, and the message did not say where the write was attempted.
+  Successful exports gave no feedback at all. Both outcomes now appear in the
+  dashboard footer for a few seconds, with the absolute path of the file, e.g.
+  `Failed to export CSV to /mnt/c/Windows/library_inventory_….csv: Permission
+  denied (os error 13)`. Exports still go to the current working directory.
+- **The dashboard's migration advice named the wrong OpenSSL version.** It said
+  OpenSSL 3.2 and later support hybrid post-quantum key exchange. OpenSSL
+  added native ML-KEM in 3.5; earlier 3.x releases need the external
+  oqs-provider. The OpenSSL recommendation and the Markdown migration plan
+  export now say 3.5.
+
 ## [0.2.1] - 2026-10-07
 
 ### Fixed
