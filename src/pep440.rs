@@ -17,8 +17,6 @@
  * plain ordered comparison. This is intentionally NOT pip *specifier*
  * semantics — no prerelease exclusion, no `~=`, no `.*` wildcards — because
  * OSV event semantics are plain ordering over the version total order.
- *
- * Part of the Slow Lynx Cryptography Discovery project.
  */
 
 use std::cmp::Ordering;

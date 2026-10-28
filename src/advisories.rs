@@ -26,8 +26,6 @@
  * `pep440` module, so pre/post/dev releases, epochs, short release segments
  * (`3.1`), and local versions all compare correctly. A version that fails its
  * ecosystem's parser matches nothing rather than being guessed.
- *
- * Part of the Slow Lynx Cryptography Discovery project.
  */
 
 use std::collections::HashMap;

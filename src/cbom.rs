@@ -14,8 +14,6 @@
  * from `scanner::CryptoFinding` and the algorithm-inference table are not yet
  * implemented (Phase A/B). Nothing in the binary constructs a `Bom` yet, hence
  * the module-level `dead_code` allowance.
- *
- * Part of the Slow Lynx Cryptography Discovery project.
  */
 
 #![allow(dead_code)]

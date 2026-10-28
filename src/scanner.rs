@@ -12,9 +12,9 @@
  * - Comprehensive reporting with categorization
  *
  * Purpose: Defensive security tool for cryptographic inventory and post-quantum migration planning
- * Part of the Slow Lynx Cryptography Discovery project
  */
 
+use crate::lockfile::LockedPackages;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -382,42 +382,181 @@ fn pypi_findings_from_requirements(content: &str, path: &Path) -> Vec<CryptoFind
 }
 
 /// Build PyPI findings for a manifest (pyproject.toml / Pipfile) from its
-/// declared-name set and an optional resolved lock map. Mirrors the Cargo/npm
-/// declared-vs-transitive split. Shared by the batch and streaming paths.
+/// declared-name set and its sibling lockfile, if any. Shared by the batch and
+/// streaming paths.
 fn pypi_findings_from_manifest(
     path: &Path,
     declared: &std::collections::HashSet<String>,
-    lock: Option<&HashMap<String, String>>,
+    lock: Option<&LockedPackages>,
 ) -> Vec<CryptoFinding> {
+    let packages = pypi_crypto_packages();
+    // PyPI manifests' requirements are not used for version selection.
+    let declared: HashMap<&str, Option<String>> = packages
+        .iter()
+        .filter(|(canon, _)| declared.contains(*canon))
+        .map(|(canon, _)| (*canon, None))
+        .collect();
+    manifest_findings(path, Ecosystem::PyPI, &packages, &declared, lock)
+}
+
+/// Build Cargo findings for a parsed `Cargo.toml`, resolving versions from its
+/// sibling `Cargo.lock`. Shared by the batch and streaming paths.
+fn cargo_findings_from_manifest(path: &Path, parsed: &toml::Value) -> Vec<CryptoFinding> {
+    let packages = cargo_crypto_crates();
+    let mut declared = HashMap::new();
+    if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_table()) {
+        for (name, _) in &packages {
+            if let Some(dep_value) = deps.get(*name) {
+                declared.insert(*name, extract_toml_version(dep_value));
+            }
+        }
+    }
+    let lock = crate::lockfile::resolve_from_sibling_lock_all(path);
+    manifest_findings(path, Ecosystem::Cargo, &packages, &declared, lock.as_ref())
+}
+
+/// Build npm findings for a parsed `package.json`, resolving versions from its
+/// sibling npm lockfile. Shared by the batch and streaming paths.
+fn npm_findings_from_manifest(path: &Path, parsed: &serde_json::Value) -> Vec<CryptoFinding> {
+    let packages = npm_crypto_packages();
+    let mut declared = HashMap::new();
+    if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
+        for (name, _) in &packages {
+            if let Some(ver_value) = deps.get(*name) {
+                declared.insert(*name, ver_value.as_str().and_then(clean_version_req));
+            }
+        }
+    }
+    let lock = crate::lockfile::resolve_npm_from_sibling_lock_all(path);
+    manifest_findings(path, Ecosystem::Npm, &packages, &declared, lock.as_ref())
+}
+
+/// Crypto findings for one manifest: a direct finding for each declared
+/// package, then a transitive finding for every other version the lockfile
+/// resolves.
+///
+/// A lockfile can hold several versions of one package (two majors of rustls
+/// in one `Cargo.lock` is common). Every one of them is installed, so every one
+/// gets its own `Locked` finding and is correlated against advisories in its own
+/// right. Reporting only one version per name would hide the rest, which is a
+/// silent false negative.
+///
+/// `declared` maps each declared crypto package to its cleaned version
+/// requirement, when the manifest gives one.
+fn manifest_findings(
+    path: &Path,
+    ecosystem: Ecosystem,
+    packages: &[(&'static str, CryptoType)],
+    declared: &HashMap<&str, Option<String>>,
+    lock: Option<&LockedPackages>,
+) -> Vec<CryptoFinding> {
+    let (direct_label, transitive_label) = match ecosystem {
+        Ecosystem::Cargo => (
+            "Rust crate dependency",
+            "Transitive Rust crate (from Cargo.lock)",
+        ),
+        Ecosystem::Npm => (
+            "Node.js package dependency",
+            "Transitive Node.js package (from package-lock.json)",
+        ),
+        Ecosystem::PyPI => (
+            "Python package dependency",
+            "Transitive Python package (from lockfile)",
+        ),
+        Ecosystem::System => ("Library", "Library"),
+    };
+    let finding = |name: &str, crypto_type: &CryptoType, finding_type, version, version_source| {
+        let label = match finding_type {
+            FindingType::TransitiveDependency => transitive_label,
+            _ => direct_label,
+        };
+        CryptoFinding {
+            path: path.display().to_string(),
+            name: name.to_string(),
+            finding_type,
+            crypto_type: crypto_type.clone(),
+            ecosystem: ecosystem.clone(),
+            version,
+            version_source,
+            details: format!("{}: {}", label, name),
+        }
+    };
+
     let mut out = Vec::new();
-    for (canon, crypto_type) in pypi_crypto_packages() {
-        let locked = lock.and_then(|l| l.get(canon)).cloned();
-        if declared.contains(canon) {
-            let (version, version_source) = resolve_version(None, locked);
-            out.push(CryptoFinding {
-                path: path.display().to_string(),
-                name: canon.to_string(),
-                finding_type: FindingType::DependencyManifest,
-                crypto_type,
-                ecosystem: Ecosystem::PyPI,
-                version,
-                version_source,
-                details: format!("Python package dependency: {}", canon),
-            });
-        } else if let Some(version) = locked {
-            out.push(CryptoFinding {
-                path: path.display().to_string(),
-                name: canon.to_string(),
-                finding_type: FindingType::TransitiveDependency,
-                crypto_type,
-                ecosystem: Ecosystem::PyPI,
-                version: Some(version),
-                version_source: VersionSource::Locked,
-                details: format!("Transitive Python package (from lockfile): {}", canon),
-            });
+    // The locked version each declared package's direct finding claimed.
+    let mut direct: HashMap<&str, &str> = HashMap::new();
+
+    for (name, crypto_type) in packages {
+        let Some(requirement) = declared.get(name) else {
+            continue;
+        };
+        let chosen = lock.and_then(|l| direct_locked_version(l, name, requirement, &ecosystem));
+        if let Some(v) = chosen {
+            direct.insert(name, v);
+        }
+        let (version, version_source) =
+            resolve_version(requirement.clone(), chosen.map(str::to_string));
+        out.push(finding(
+            name,
+            crypto_type,
+            FindingType::DependencyManifest,
+            version,
+            version_source,
+        ));
+    }
+
+    if let Some(lock) = lock {
+        for (name, crypto_type) in packages {
+            for version in lock.versions(name) {
+                if direct.get(name) == Some(&version.as_str()) {
+                    continue;
+                }
+                out.push(finding(
+                    name,
+                    crypto_type,
+                    FindingType::TransitiveDependency,
+                    Some(version.clone()),
+                    VersionSource::Locked,
+                ));
+            }
         }
     }
     out
+}
+
+/// Pick the locked version a declared package's direct finding should carry.
+///
+/// npm lockfiles record which copy is installed at the top level, and that is
+/// the one the project imports. Otherwise, with several versions to choose
+/// from, take the highest that satisfies the declared requirement, falling back
+/// to the first one listed. The choice only decides which version is labelled
+/// direct: every other version still gets a transitive finding of its own.
+fn direct_locked_version<'a>(
+    lock: &'a LockedPackages,
+    name: &str,
+    requirement: &Option<String>,
+    ecosystem: &Ecosystem,
+) -> Option<&'a str> {
+    if let Some(top) = lock.top_level(name) {
+        return Some(top);
+    }
+    let versions = lock.versions(name);
+    if versions.len() > 1 && matches!(ecosystem, Ecosystem::Cargo | Ecosystem::Npm) {
+        if let Some(req) = requirement
+            .as_deref()
+            .and_then(|r| semver::VersionReq::parse(r).ok())
+        {
+            let best = versions
+                .iter()
+                .filter_map(|v| semver::Version::parse(v).ok().map(|parsed| (parsed, v)))
+                .filter(|(parsed, _)| req.matches(parsed))
+                .max_by(|a, b| a.0.cmp(&b.0));
+            if let Some((_, v)) = best {
+                return Some(v.as_str());
+            }
+        }
+    }
+    versions.first().map(String::as_str)
 }
 
 /// Leading project-name token of a PEP 508 requirement string (`"cryptography>=41"`
@@ -691,57 +830,8 @@ impl CryptoScanner {
             Err(_) => return Ok(()), // Skip malformed TOML files
         };
 
-        let crypto_crates = cargo_crypto_crates();
-        // Resolved versions from a sibling Cargo.lock, when present.
-        let lock = crate::lockfile::resolve_from_sibling_lock(path);
-
-        // Crypto crates declared directly in this manifest (so we don't also
-        // report them as transitive).
-        let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-
-        if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_table()) {
-            for (crate_name, crypto_type) in &crypto_crates {
-                if let Some(dep_value) = deps.get(*crate_name) {
-                    declared.insert(*crate_name);
-                    let (version, version_source) = resolve_version(
-                        extract_toml_version(dep_value),
-                        lock.as_ref().and_then(|l| l.get(*crate_name).cloned()),
-                    );
-                    self.findings.push(CryptoFinding {
-                        path: path.display().to_string(),
-                        name: crate_name.to_string(),
-                        finding_type: FindingType::DependencyManifest,
-                        crypto_type: crypto_type.clone(),
-                        ecosystem: Ecosystem::Cargo,
-                        version,
-                        version_source,
-                        details: format!("Rust crate dependency: {}", crate_name),
-                    });
-                }
-            }
-        }
-
-        // Transitive crypto: crates present in the lockfile but not declared
-        // directly in this manifest. This is where most crypto actually lives.
-        if let Some(lock) = lock.as_ref() {
-            for (crate_name, crypto_type) in &crypto_crates {
-                if declared.contains(*crate_name) {
-                    continue;
-                }
-                if let Some(version) = lock.get(*crate_name) {
-                    self.findings.push(CryptoFinding {
-                        path: path.display().to_string(),
-                        name: crate_name.to_string(),
-                        finding_type: FindingType::TransitiveDependency,
-                        crypto_type: crypto_type.clone(),
-                        ecosystem: Ecosystem::Cargo,
-                        version: Some(version.clone()),
-                        version_source: VersionSource::Locked,
-                        details: format!("Transitive Rust crate (from Cargo.lock): {}", crate_name),
-                    });
-                }
-            }
-        }
+        self.findings
+            .extend(cargo_findings_from_manifest(path, &parsed));
 
         Ok(())
     }
@@ -757,67 +847,10 @@ impl CryptoScanner {
             Err(e) => return Err(e),
         };
 
-        match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(parsed) => {
-                let crypto_packages = npm_crypto_packages();
-                // Resolved versions from a sibling npm lockfile, when present.
-                let lock = crate::lockfile::resolve_npm_from_sibling_lock(path);
-
-                // Crypto packages declared directly here (so we don't also report
-                // them as transitive).
-                let mut declared: std::collections::HashSet<&str> =
-                    std::collections::HashSet::new();
-
-                if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
-                    for (pkg_name, crypto_type) in &crypto_packages {
-                        if let Some(ver_value) = deps.get(*pkg_name) {
-                            declared.insert(*pkg_name);
-                            let (version, version_source) = resolve_version(
-                                ver_value.as_str().and_then(clean_version_req),
-                                lock.as_ref().and_then(|l| l.get(*pkg_name).cloned()),
-                            );
-                            self.findings.push(CryptoFinding {
-                                path: path.display().to_string(),
-                                name: pkg_name.to_string(),
-                                finding_type: FindingType::DependencyManifest,
-                                crypto_type: crypto_type.clone(),
-                                ecosystem: Ecosystem::Npm,
-                                version,
-                                version_source,
-                                details: format!("Node.js package dependency: {}", pkg_name),
-                            });
-                        }
-                    }
-                }
-
-                // Transitive crypto: packages in the lockfile but not declared
-                // directly in this manifest.
-                if let Some(lock) = lock.as_ref() {
-                    for (pkg_name, crypto_type) in &crypto_packages {
-                        if declared.contains(*pkg_name) {
-                            continue;
-                        }
-                        if let Some(version) = lock.get(*pkg_name) {
-                            self.findings.push(CryptoFinding {
-                                path: path.display().to_string(),
-                                name: pkg_name.to_string(),
-                                finding_type: FindingType::TransitiveDependency,
-                                crypto_type: crypto_type.clone(),
-                                ecosystem: Ecosystem::Npm,
-                                version: Some(version.clone()),
-                                version_source: VersionSource::Locked,
-                                details: format!(
-                                    "Transitive Node.js package (from package-lock.json): {}",
-                                    pkg_name
-                                ),
-                            });
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                // Skip malformed JSON files
-            }
+        // Malformed JSON is skipped.
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+            self.findings
+                .extend(npm_findings_from_manifest(path, &parsed));
         }
 
         Ok(())
@@ -854,7 +887,7 @@ impl CryptoScanner {
             Err(_) => return Ok(()),
         };
         let declared = pyproject_declared_names(&parsed);
-        let lock = crate::lockfile::resolve_pypi_from_sibling_lock(path);
+        let lock = crate::lockfile::resolve_pypi_from_sibling_lock_all(path);
         for finding in pypi_findings_from_manifest(path, &declared, lock.as_ref()) {
             self.findings.push(finding);
         }
@@ -874,7 +907,7 @@ impl CryptoScanner {
             Err(_) => return Ok(()),
         };
         let declared = pipfile_declared_names(&parsed);
-        let lock = crate::lockfile::resolve_pypi_from_sibling_lock(path);
+        let lock = crate::lockfile::resolve_pypi_from_sibling_lock_all(path);
         for finding in pypi_findings_from_manifest(path, &declared, lock.as_ref()) {
             self.findings.push(finding);
         }
@@ -1192,59 +1225,10 @@ impl CryptoScanner {
             Err(_) => return Ok(()),
         };
 
-        let crypto_crates = cargo_crypto_crates();
-        let lock = crate::lockfile::resolve_from_sibling_lock(path);
-        let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-
-        if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_table()) {
-            for (crate_name, crypto_type) in &crypto_crates {
-                if let Some(dep_value) = deps.get(*crate_name) {
-                    declared.insert(*crate_name);
-                    let (version, version_source) = resolve_version(
-                        extract_toml_version(dep_value),
-                        lock.as_ref().and_then(|l| l.get(*crate_name).cloned()),
-                    );
-                    let finding = CryptoFinding {
-                        path: path.display().to_string(),
-                        name: crate_name.to_string(),
-                        finding_type: FindingType::DependencyManifest,
-                        crypto_type: crypto_type.clone(),
-                        ecosystem: Ecosystem::Cargo,
-                        version,
-                        version_source,
-                        details: format!("Rust crate dependency: {}", crate_name),
-                    };
-
-                    let library_info = self.finding_to_library_info(&finding);
-                    self.findings.push(finding);
-                    callback(StreamingScanEvent::LibraryFound(library_info));
-                }
-            }
-        }
-
-        // Transitive crypto resolved from a sibling Cargo.lock.
-        if let Some(lock) = lock.as_ref() {
-            for (crate_name, crypto_type) in &crypto_crates {
-                if declared.contains(*crate_name) {
-                    continue;
-                }
-                if let Some(version) = lock.get(*crate_name) {
-                    let finding = CryptoFinding {
-                        path: path.display().to_string(),
-                        name: crate_name.to_string(),
-                        finding_type: FindingType::TransitiveDependency,
-                        crypto_type: crypto_type.clone(),
-                        ecosystem: Ecosystem::Cargo,
-                        version: Some(version.clone()),
-                        version_source: VersionSource::Locked,
-                        details: format!("Transitive Rust crate (from Cargo.lock): {}", crate_name),
-                    };
-
-                    let library_info = self.finding_to_library_info(&finding);
-                    self.findings.push(finding);
-                    callback(StreamingScanEvent::LibraryFound(library_info));
-                }
-            }
+        for finding in cargo_findings_from_manifest(path, &parsed) {
+            let library_info = self.finding_to_library_info(&finding);
+            self.findings.push(finding);
+            callback(StreamingScanEvent::LibraryFound(library_info));
         }
 
         Ok(())
@@ -1269,62 +1253,10 @@ impl CryptoScanner {
         };
 
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-            let crypto_packages = npm_crypto_packages();
-            let lock = crate::lockfile::resolve_npm_from_sibling_lock(path);
-
-            let mut declared: std::collections::HashSet<&str> = std::collections::HashSet::new();
-
-            if let Some(deps) = parsed.get("dependencies").and_then(|v| v.as_object()) {
-                for (pkg_name, crypto_type) in &crypto_packages {
-                    if let Some(ver_value) = deps.get(*pkg_name) {
-                        declared.insert(*pkg_name);
-                        let (version, version_source) = resolve_version(
-                            ver_value.as_str().and_then(clean_version_req),
-                            lock.as_ref().and_then(|l| l.get(*pkg_name).cloned()),
-                        );
-                        let finding = CryptoFinding {
-                            path: path.display().to_string(),
-                            name: pkg_name.to_string(),
-                            finding_type: FindingType::DependencyManifest,
-                            crypto_type: crypto_type.clone(),
-                            ecosystem: Ecosystem::Npm,
-                            version,
-                            version_source,
-                            details: format!("Node.js package dependency: {}", pkg_name),
-                        };
-
-                        let library_info = self.finding_to_library_info(&finding);
-                        self.findings.push(finding);
-                        callback(StreamingScanEvent::LibraryFound(library_info));
-                    }
-                }
-            }
-
-            if let Some(lock) = lock.as_ref() {
-                for (pkg_name, crypto_type) in &crypto_packages {
-                    if declared.contains(*pkg_name) {
-                        continue;
-                    }
-                    if let Some(version) = lock.get(*pkg_name) {
-                        let finding = CryptoFinding {
-                            path: path.display().to_string(),
-                            name: pkg_name.to_string(),
-                            finding_type: FindingType::TransitiveDependency,
-                            crypto_type: crypto_type.clone(),
-                            ecosystem: Ecosystem::Npm,
-                            version: Some(version.clone()),
-                            version_source: VersionSource::Locked,
-                            details: format!(
-                                "Transitive Node.js package (from package-lock.json): {}",
-                                pkg_name
-                            ),
-                        };
-
-                        let library_info = self.finding_to_library_info(&finding);
-                        self.findings.push(finding);
-                        callback(StreamingScanEvent::LibraryFound(library_info));
-                    }
-                }
+            for finding in npm_findings_from_manifest(path, &parsed) {
+                let library_info = self.finding_to_library_info(&finding);
+                self.findings.push(finding);
+                callback(StreamingScanEvent::LibraryFound(library_info));
             }
         }
 
@@ -1377,7 +1309,7 @@ impl CryptoScanner {
             Err(_) => return Ok(()),
         };
         let declared = pyproject_declared_names(&parsed);
-        let lock = crate::lockfile::resolve_pypi_from_sibling_lock(path);
+        let lock = crate::lockfile::resolve_pypi_from_sibling_lock_all(path);
         for finding in pypi_findings_from_manifest(path, &declared, lock.as_ref()) {
             let library_info = self.finding_to_library_info(&finding);
             self.findings.push(finding);
@@ -1405,7 +1337,7 @@ impl CryptoScanner {
             Err(_) => return Ok(()),
         };
         let declared = pipfile_declared_names(&parsed);
-        let lock = crate::lockfile::resolve_pypi_from_sibling_lock(path);
+        let lock = crate::lockfile::resolve_pypi_from_sibling_lock_all(path);
         for finding in pypi_findings_from_manifest(path, &declared, lock.as_ref()) {
             let library_info = self.finding_to_library_info(&finding);
             self.findings.push(finding);
@@ -1498,9 +1430,9 @@ requests==2.31.0
         let mut declared = std::collections::HashSet::new();
         declared.insert("cryptography".to_string());
 
-        let mut lock = HashMap::new();
-        lock.insert("cryptography".to_string(), "41.0.7".to_string());
-        lock.insert("pynacl".to_string(), "1.5.0".to_string()); // transitive (not declared)
+        let mut lock = LockedPackages::default();
+        lock.insert("cryptography".to_string(), "41.0.7");
+        lock.insert("pynacl".to_string(), "1.5.0"); // transitive (not declared)
 
         let findings =
             pypi_findings_from_manifest(Path::new("/p/pyproject.toml"), &declared, Some(&lock));
