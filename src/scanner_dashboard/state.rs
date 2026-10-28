@@ -688,7 +688,7 @@ impl ScannerDashboardState {
                             6,
                             EffortLevel::High,
                             MigrationPriority::High,
-                            "OpenSSL 3.2+ supports hybrid PQ. Upgrade recommended within 6-12 months.".to_string(),
+                            "OpenSSL 3.5+ supports ML-KEM natively (earlier 3.x needs oqs-provider). Upgrade recommended within 6-12 months.".to_string(),
                         )
                     } else if lib.name.contains("gnutls") {
                         (
@@ -1082,7 +1082,7 @@ impl ScannerDashboardState {
         .unwrap();
         writeln!(
             output,
-            "   - Update libraries to versions with PQ support (e.g., OpenSSL 3.2+)"
+            "   - Update libraries to versions with PQ support (e.g., OpenSSL 3.5+)"
         )
         .unwrap();
         writeln!(output).unwrap();
