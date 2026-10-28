@@ -6,6 +6,7 @@
 
 use crate::scanner_dashboard::state::{ScannerDashboardState, ViewMode};
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub enum AppAction {
@@ -190,10 +191,7 @@ fn handle_key_event(
                     "migration_plan_{}.md",
                     chrono::Local::now().format("%Y%m%d_%H%M%S")
                 );
-
-                if let Err(e) = std::fs::write(&filename, markdown) {
-                    eprintln!("Failed to export migration plan: {}", e);
-                }
+                export_file(state, "migration plan", &filename, &markdown);
             } else {
                 // Export full scan results to JSON
                 match state.export_to_json() {
@@ -202,13 +200,10 @@ fn handle_key_event(
                             "scan_results_{}.json",
                             chrono::Local::now().format("%Y%m%d_%H%M%S")
                         );
-
-                        if let Err(e) = std::fs::write(&filename, json) {
-                            eprintln!("Failed to export JSON: {}", e);
-                        }
+                        export_file(state, "JSON", &filename, &json);
                     }
                     Err(e) => {
-                        eprintln!("Failed to generate JSON: {}", e);
+                        state.set_status(format!("Failed to generate JSON: {}", e), true);
                     }
                 }
             }
@@ -222,10 +217,7 @@ fn handle_key_event(
                 "library_inventory_{}.csv",
                 chrono::Local::now().format("%Y%m%d_%H%M%S")
             );
-
-            if let Err(e) = std::fs::write(&filename, csv) {
-                eprintln!("Failed to export CSV: {}", e);
-            }
+            export_file(state, "CSV", &filename, &csv);
             Ok(AppAction::Continue)
         }
 
@@ -236,5 +228,76 @@ fn handle_key_event(
         }
 
         _ => Ok(AppAction::Continue),
+    }
+}
+
+/// Write an export into the current working directory and report the
+/// outcome in the footer. Raw mode is active, so stderr is not an option.
+fn export_file(state: &mut ScannerDashboardState, kind: &str, filename: &str, contents: &str) {
+    let dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    export_file_in(state, &dir, kind, filename, contents);
+}
+
+/// Write `contents` to `dir/filename` and set a footer status naming the full
+/// path, so the user can see where the file went (or where the write failed).
+fn export_file_in(
+    state: &mut ScannerDashboardState,
+    dir: &Path,
+    kind: &str,
+    filename: &str,
+    contents: &str,
+) {
+    let path = dir.join(filename);
+    match std::fs::write(&path, contents) {
+        Ok(()) => state.set_status(format!("Saved {} to {}", kind, path.display()), false),
+        Err(e) => state.set_status(
+            format!("Failed to export {} to {}: {}", kind, path.display(), e),
+            true,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("lens3329-export-{}-{}", tag, std::process::id()))
+    }
+
+    #[test]
+    fn export_success_reports_full_path() {
+        let dir = test_dir("ok");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut state = ScannerDashboardState::new(PathBuf::from("."), None);
+
+        export_file_in(&mut state, &dir, "CSV", "out.csv", "a,b\n");
+
+        let status = state.active_status().expect("status should be visible");
+        assert!(!status.is_error);
+        assert!(status
+            .text
+            .contains(&dir.join("out.csv").display().to_string()));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("out.csv")).unwrap(),
+            "a,b\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn export_failure_reports_attempted_path_and_error() {
+        // Directory deliberately not created, so the write fails.
+        let dir = test_dir("missing");
+        let mut state = ScannerDashboardState::new(PathBuf::from("."), None);
+
+        export_file_in(&mut state, &dir, "CSV", "out.csv", "x");
+
+        let status = state.active_status().expect("status should be visible");
+        assert!(status.is_error);
+        assert!(status
+            .text
+            .contains(&dir.join("out.csv").display().to_string()));
+        assert!(status.text.starts_with("Failed to export CSV to "));
     }
 }
